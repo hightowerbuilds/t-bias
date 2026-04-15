@@ -20,6 +20,15 @@ import { type Cell, type Color, DEFAULT_COLOR } from "./types";
 /** Sentinel in chars[] meaning "look up the row's grapheme map for the actual string". */
 const GRAPHEME_SENTINEL = 0xFFFFFFFF;
 
+// OSC 133 shell-integration prompt mark values (stored in Uint8Arrays)
+export const MARK_NONE    = 0;
+export const MARK_A       = 1;  // prompt start
+export const MARK_B       = 2;  // command start (end of prompt)
+export const MARK_C       = 3;  // output start (command accepted)
+export const MARK_D_UNKNOWN = 4; // command done, no exit code
+export const MARK_D_SUCCESS = 5; // command done, exit 0
+export const MARK_D_FAILURE = 6; // command done, exit non-zero
+
 /** Number of typed-array attributes per cell (chars, fg, bg, attrs, ulColor). */
 const ATTRS_PER_CELL = 5;
 
@@ -36,6 +45,7 @@ interface BufferPage {
   bg: Uint32Array;
   attrs: Uint32Array;
   ulColor: Uint32Array;
+  url: Uint16Array;   // URL ID per cell (0 = none, 1-indexed into urlTable)
 }
 
 export class VirtualCanvas {
@@ -82,6 +92,14 @@ export class VirtualCanvas {
   private sbCols: number; // column width the ring was allocated for
   private scrollbackLimit: number;
 
+  // URL intern table for OSC 8 hyperlinks (1-indexed; 0 = no URL)
+  private urlTable: string[] = [];
+  private urlByStr = new Map<string, number>();
+
+  // OSC 133 prompt marks — one byte per physical row / scrollback slot
+  private sbPromptMark: Uint8Array;     // indexed by scrollback slot
+  private activePromptMark: Uint8Array; // indexed by physical row
+
   constructor(cols: number, rows: number, scrollbackLimit = 5000) {
     this.cols = cols;
     this.rows = rows;
@@ -114,6 +132,10 @@ export class VirtualCanvas {
     this.rowGraphemes = new Array(this.physRows).fill(null);
     this.softWrapped = new Uint8Array(this.physRows);
 
+    // Prompt marks (one byte per slot / physical row)
+    this.sbPromptMark = new Uint8Array(scrollbackLimit);
+    this.activePromptMark = new Uint8Array(this.physRows);
+
     // Allocate scrollback ring buffer (4.2: Uint16Array for attrs, no ulColor)
     this.sbCols = cols;
     const sbSize = scrollbackLimit * cols;
@@ -134,6 +156,7 @@ export class VirtualCanvas {
       bg: new Uint32Array(size),         // DEFAULT_COLOR = 0
       attrs: new Uint32Array(size),      // 0 = no attributes
       ulColor: new Uint32Array(size),    // DEFAULT_COLOR = 0
+      url: new Uint16Array(size),        // 0 = no URL
     };
   }
 
@@ -318,6 +341,7 @@ export class VirtualCanvas {
     page.bg.fill(bg, start, end);
     page.attrs.fill(0, start, end);
     page.ulColor.fill(DEFAULT_COLOR, start, end);
+    page.url.fill(0, start, end);
     // Clear graphemes in the erased range (use physical row)
     const physRow = this.activeRowMap[row];
     if (this.physRowHasGraphemes(physRow)) {
@@ -339,8 +363,10 @@ export class VirtualCanvas {
     page.bg.fill(bg, offset, offset + this.cols);
     page.attrs.fill(0, offset, offset + this.cols);
     page.ulColor.fill(DEFAULT_COLOR, offset, offset + this.cols);
+    page.url.fill(0, offset, offset + this.cols);
     this.clearPhysRowGraphemes(this.activeRowMap[row]);
     this.softWrapped[this.activeRowMap[row]] = 0;
+    this.activePromptMark[this.activeRowMap[row]] = 0;
     this.markDirty(row);
   }
 
@@ -461,6 +487,7 @@ export class VirtualCanvas {
       page.bg.fill(bg, offset + cStart, offset + cEnd);
       page.attrs.fill(attrs, offset + cStart, offset + cEnd);
       page.ulColor.fill(ulColor, offset + cStart, offset + cEnd);
+      page.url.fill(0, offset + cStart, offset + cEnd);
       this.clearPhysRowGraphemes(this.activeRowMap[r]);
       this.markDirty(r);
     }
@@ -519,9 +546,13 @@ export class VirtualCanvas {
   /** Full reset — clear both pages, grapheme map, scrollback, switch to main. */
   resetAll(): void {
     this.mainPage.chars.fill(0); this.mainPage.fg.fill(0);
-    this.mainPage.bg.fill(0); this.mainPage.attrs.fill(0); this.mainPage.ulColor.fill(0);
+    this.mainPage.bg.fill(0); this.mainPage.attrs.fill(0); this.mainPage.ulColor.fill(0); this.mainPage.url.fill(0);
     this.altPage.chars.fill(0); this.altPage.fg.fill(0);
-    this.altPage.bg.fill(0); this.altPage.attrs.fill(0); this.altPage.ulColor.fill(0);
+    this.altPage.bg.fill(0); this.altPage.attrs.fill(0); this.altPage.ulColor.fill(0); this.altPage.url.fill(0);
+    this.urlTable = [];
+    this.urlByStr.clear();
+    this.sbPromptMark.fill(0);
+    this.activePromptMark.fill(0);
     // Reset both rowMaps to identity
     this.resetRowMap(this.mainRowMap);
     this.resetRowMap(this.altRowMap);
@@ -580,6 +611,9 @@ export class VirtualCanvas {
       }
     }
 
+    // Copy prompt mark for this row to the scrollback slot
+    this.sbPromptMark[slot] = this.activePromptMark[physRow];
+
     if (this.sbCount < this.scrollbackLimit) {
       this.sbCount++;
     } else {
@@ -590,6 +624,103 @@ export class VirtualCanvas {
 
   get scrollbackLength(): number {
     return this.sbCount;
+  }
+
+  /** Return a row from scrollback as a plain string (one char per cell, space for empty).
+   *  scrollRow 0 = oldest row. Used by the search engine. */
+  getScrollbackRowText(scrollRow: number): string {
+    if (scrollRow < 0 || scrollRow >= this.sbCount) return "";
+    const physRow = (this.sbHead + scrollRow) % this.scrollbackLimit;
+    const base = physRow * this.sbCols;
+    const cols = Math.min(this.cols, this.sbCols);
+    let text = "";
+    for (let c = 0; c < cols; c++) {
+      const cp = this.sbChars[base + c];
+      text += cp === 0 ? " " : String.fromCodePoint(cp);
+    }
+    return text;
+  }
+
+  /** Return an active-buffer row as a plain string (one entry per cell, space for empty).
+   *  Used by the search engine. */
+  getActiveRowText(row: number): string {
+    if (row < 0 || row >= this.rows) return "";
+    const physRow = this.activeRowMap[row];
+    const offset = physRow * this.physCols;
+    const page = this.activePage;
+    let text = "";
+    for (let c = 0; c < this.cols; c++) {
+      const cp = page.chars[offset + c];
+      if (cp === 0) {
+        text += " ";
+      } else if (cp === GRAPHEME_SENTINEL) {
+        text += this.getGraphemePhys(physRow, c) ?? " ";
+      } else {
+        text += String.fromCodePoint(cp);
+      }
+    }
+    return text;
+  }
+
+  // =========================================================================
+  // OSC 8 URL storage
+  // =========================================================================
+
+  /** Intern a URL string and return a stable 1-indexed ID (0 reserved for "no URL"). */
+  internUrl(url: string): number {
+    let id = this.urlByStr.get(url);
+    if (id === undefined) {
+      id = this.urlTable.length + 1;
+      this.urlTable.push(url);
+      this.urlByStr.set(url, id);
+    }
+    return id;
+  }
+
+  /** Write a URL ID to a single cell in the active buffer. */
+  setUrl(row: number, col: number, urlId: number): void {
+    if (row < 0 || row >= this.rows || col < 0 || col >= this.cols) return;
+    this.activePage.url[this.activeRowMap[row] * this.physCols + col] = urlId;
+  }
+
+  /** Read the URL ID at a cell in the active buffer (0 = no URL). */
+  getUrlId(row: number, col: number): number {
+    if (row < 0 || row >= this.rows || col < 0 || col >= this.cols) return 0;
+    return this.activePage.url[this.activeRowMap[row] * this.physCols + col];
+  }
+
+  /** Resolve a URL ID to its string ("" if id is 0 or unknown). */
+  getUrlStr(id: number): string {
+    return id > 0 ? (this.urlTable[id - 1] ?? "") : "";
+  }
+
+  /** Get URL string at a cell in the active buffer, or null if none. */
+  getUrlAt(row: number, col: number): string | null {
+    const id = this.getUrlId(row, col);
+    if (id === 0) return null;
+    return this.urlTable[id - 1] ?? null;
+  }
+
+  // =========================================================================
+  // OSC 133 prompt marks
+  // =========================================================================
+
+  /** Set the prompt mark for a logical active-buffer row. */
+  setPromptMark(row: number, mark: number): void {
+    if (row < 0 || row >= this.rows) return;
+    this.activePromptMark[this.activeRowMap[row]] = mark;
+  }
+
+  /** Get the prompt mark for a logical active-buffer row (0 = none). */
+  getPromptMark(row: number): number {
+    if (row < 0 || row >= this.rows) return 0;
+    return this.activePromptMark[this.activeRowMap[row]];
+  }
+
+  /** Get the prompt mark for a scrollback row (scrollRow 0 = oldest; 0 = none). */
+  getScrollbackPromptMark(scrollRow: number): number {
+    if (scrollRow < 0 || scrollRow >= this.sbCount) return 0;
+    return this.sbPromptMark[(this.sbHead + scrollRow) % this.scrollbackLimit];
   }
 
   trimScrollback(): void {
@@ -669,6 +800,9 @@ export class VirtualCanvas {
       this.resetRowMap(this.altRowMap);
       this.activeRowMap = this.isAlt ? this.altRowMap : this.mainRowMap;
 
+      // Prompt marks: clear on resize (rowMap reset to identity invalidates physical-row mapping)
+      this.activePromptMark.fill(0);
+
       // Rebuild dirty tracking for new row count
       this.markAllDirty();
     } else {
@@ -690,6 +824,7 @@ export class VirtualCanvas {
           newPage.bg.set(oldPage.bg.subarray(sOff, sOff + copyCols), dOff);
           newPage.attrs.set(oldPage.attrs.subarray(sOff, sOff + copyCols), dOff);
           newPage.ulColor.set(oldPage.ulColor.subarray(sOff, sOff + copyCols), dOff);
+          newPage.url.set(oldPage.url.subarray(sOff, sOff + copyCols), dOff);
         }
         return newPage;
       };
@@ -739,6 +874,9 @@ export class VirtualCanvas {
       this.resetRowMap(this.altRowMap);
       this.activeRowMap = this.isAlt ? this.altRowMap : this.mainRowMap;
 
+      // Prompt marks: allocate fresh (marks lost on physical-layout change)
+      this.activePromptMark = new Uint8Array(newPhysRows);
+
       // Rebuild dirty tracking arrays for new physRows
       this.dirtyBitmap = new Uint8Array(newPhysRows);
       this.dirtyColStart = new Uint16Array(newPhysRows);
@@ -757,6 +895,7 @@ export class VirtualCanvas {
       this.sbAttrs = new Uint16Array(sbSize);
       this.sbHead = 0;
       this.sbCount = 0;
+      this.sbPromptMark.fill(0);
     }
   }
 

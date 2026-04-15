@@ -1,4 +1,4 @@
-import { TerminalCore } from "./TerminalCore";
+import { TerminalCore, type SearchMatch } from "./TerminalCore";
 import { Selection } from "./Selection";
 import { keyboardEventToSequence } from "./input";
 import type { IRenderer, SelectionBounds } from "./IRenderer";
@@ -69,6 +69,23 @@ export class TerminalHost {
   // Debug overlay
   private debugOverlay = false;
   private debugEl: HTMLDivElement | null = null;
+
+  // URL hover state
+  private hoveredUrl: string | null = null;
+  private hoveredUrlRow = -1;
+  private hoveredUrlStartCol = -1;
+  private hoveredUrlEndCol = -1;
+  private contextMenu: HTMLDivElement | null = null;
+
+  // Search
+  private searchBar: HTMLDivElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
+  private searchCountEl: HTMLSpanElement | null = null;
+  private searchMatches: SearchMatch[] = [];
+  private searchMatchIndex = -1;
+  private searchCaseSensitive = false;
+  private searchRegex = false;
+  private searchDebounceTimer: number | null = null;
 
   // Latency + throughput measurement
   private lastKeypressTime = 0;    // timestamp of most recent keypress
@@ -283,6 +300,9 @@ export class TerminalHost {
     inputTarget.removeEventListener("blur", this.handleBlur);
     if (this.blinkTimer !== null) clearInterval(this.blinkTimer);
     if (this.throughputTimer !== null) clearInterval(this.throughputTimer);
+    if (this.searchDebounceTimer !== null) clearTimeout(this.searchDebounceTimer);
+    this.searchBar?.remove();
+    this.dismissContextMenu();
     this.renderer.dispose();
     this.selectionCanvas?.remove();
     this.cursorCanvas?.remove();
@@ -293,6 +313,23 @@ export class TerminalHost {
   // =========================================================================
   private handleKeyDown = (e: KeyboardEvent) => {
     const modes = this.core.modes;
+
+    // Cmd+F: open search bar (or navigate to next match if already open)
+    if (e.metaKey && e.key === "f") {
+      e.preventDefault();
+      if (this.searchBar) {
+        this.navigateMatch(1);
+      } else {
+        this.openSearch();
+      }
+      return;
+    }
+
+    // ESC: dismiss context menu first, then search bar
+    if (e.key === "Escape") {
+      if (this.contextMenu) { e.preventDefault(); this.dismissContextMenu(); return; }
+      if (this.searchBar) { e.preventDefault(); this.closeSearch(); return; }
+    }
 
     if (e.metaKey && e.key === "c") {
       if (this.selection.active) {
@@ -321,6 +358,30 @@ export class TerminalHost {
       this.setFontSize(this.defaultFontSize);
       return;
     }
+    // Cmd+Up/Down: jump between shell prompts (OSC 133)
+    if (e.metaKey && !e.shiftKey && !modes.isAlternateScreen) {
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const absRow = this.core.findPrevPrompt();
+        if (absRow >= 0) {
+          this.core.scrollToPrompt(absRow);
+          this.scheduleTextDraw();
+          this.scheduleOverlayDraw();
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const absRow = this.core.findNextPrompt();
+        if (absRow >= 0) {
+          this.core.scrollToPrompt(absRow);
+          this.scheduleTextDraw();
+          this.scheduleOverlayDraw();
+        }
+        return;
+      }
+    }
+
     // Cmd+Shift+D: toggle debug overlay
     if (e.metaKey && e.shiftKey && (e.key === "d" || e.key === "D")) {
       e.preventDefault();
@@ -412,6 +473,17 @@ export class TerminalHost {
     const row = this.mouseRow(e);
     const modes = this.core.modes;
 
+    // Cmd+Click: open URL under cursor
+    if (e.button === 0 && e.metaKey && !modes.mouseEnabled
+        && !modes.isAlternateScreen && this.core.viewportOffset === 0) {
+      const url = this.getUrlAtPosition(row, col);
+      if (url) {
+        e.preventDefault();
+        (window as any).__TAURI__.shell.open(url);
+        return;
+      }
+    }
+
     if (modes.mouseEnabled && e.button === 0 && !e.shiftKey) {
       e.preventDefault();
       let button = e.button;
@@ -464,6 +536,13 @@ export class TerminalHost {
       return;
     }
 
+    // URL hover detection (only in live view, no mouse protocol, no alt screen)
+    if (!modes.mouseEnabled && !modes.isAlternateScreen && this.core.viewportOffset === 0) {
+      this.detectHoveredUrl(row, col);
+    } else {
+      this.clearHoveredUrl();
+    }
+
     if (!modes.mouseEnabled) return;
     if (!modes.mouseAll && !(modes.mouseDrag && this.mouseDown)) return;
 
@@ -488,8 +567,15 @@ export class TerminalHost {
     }
   };
 
-  private handleContextMenu = (e: Event) => {
-    if (this.core.modes.mouseEnabled) e.preventDefault();
+  private handleContextMenu = (e: MouseEvent) => {
+    if (this.core.modes.mouseEnabled) { e.preventDefault(); return; }
+    e.preventDefault();
+
+    let url: string | null = null;
+    if (!this.core.modes.isAlternateScreen && this.core.viewportOffset === 0) {
+      url = this.getUrlAtPosition(this.mouseRow(e), this.mouseCol(e));
+    }
+    this.showContextMenu(e.clientX, e.clientY, url ?? undefined);
   };
 
   private handleFocus = () => {
@@ -552,6 +638,83 @@ export class TerminalHost {
 
     ctx.clearRect(0, 0, w, h);
 
+    // OSC 133 exit-status indicators (3px left-edge bar: green = success, red = failure)
+    if (!this.core.modes.isAlternateScreen) {
+      const dMarks = this.core.getVisibleDMarks();
+      for (const { viewportRow, success } of dMarks) {
+        ctx.fillStyle = success ? "#6a9955" : "#f44747";
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(0, viewportRow * cellHeight + 1, 3, cellHeight - 2);
+      }
+      ctx.globalAlpha = 1.0;
+    }
+
+    // OSC 8 URL underlines + hovered auto-detect URL underline
+    if (!this.core.modes.isAlternateScreen && this.core.viewportOffset === 0) {
+      const vc = this.core.virtualCanvas;
+      ctx.fillStyle = "#569cd6";
+      ctx.globalAlpha = 0.85;
+
+      for (let r = 0; r < this.rows; r++) {
+        // Scan for contiguous URL spans and draw a 1px underline per span
+        let spanStart = -1;
+        let spanId = 0;
+        for (let c = 0; c <= this.cols; c++) {
+          const id = c < this.cols ? vc.getUrlId(r, c) : 0;
+          if (id !== spanId) {
+            if (spanId !== 0 && spanStart >= 0) {
+              ctx.fillRect(
+                spanStart * cellWidth,
+                r * cellHeight + cellHeight - 2,
+                (c - spanStart) * cellWidth,
+                1,
+              );
+            }
+            spanId = id;
+            spanStart = c;
+          }
+        }
+      }
+
+      // Hovered auto-detect URL (no OSC 8 data at that cell)
+      if (this.hoveredUrl !== null && this.hoveredUrlRow >= 0
+          && this.hoveredUrlRow < this.rows
+          && vc.getUrlId(this.hoveredUrlRow, this.hoveredUrlStartCol) === 0) {
+        ctx.fillRect(
+          this.hoveredUrlStartCol * cellWidth,
+          this.hoveredUrlRow * cellHeight + cellHeight - 2,
+          (this.hoveredUrlEndCol - this.hoveredUrlStartCol) * cellWidth,
+          1,
+        );
+      }
+
+      ctx.globalAlpha = 1.0;
+    }
+
+    // Search match highlights
+    if (this.searchMatches.length > 0 && !this.core.modes.isAlternateScreen) {
+      const sbLen = this.core.scrollbackLength;
+      const vOffset = this.core.viewportOffset;
+
+      for (let i = 0; i < this.searchMatches.length; i++) {
+        const match = this.searchMatches[i];
+        const viewportRow = match.absRow - sbLen + vOffset;
+        if (viewportRow < 0 || viewportRow >= this.rows) continue;
+
+        const isCurrent = i === this.searchMatchIndex;
+        ctx.fillStyle = isCurrent ? "#f0c040" : "#806020";
+        ctx.globalAlpha = isCurrent ? 0.7 : 0.4;
+        ctx.fillRect(
+          match.col * cellWidth,
+          viewportRow * cellHeight,
+          Math.max(1, match.len) * cellWidth,
+          cellHeight,
+        );
+      }
+      ctx.globalAlpha = 1.0;
+    }
+
+    // Selection
     const sel = this.selection.range;
     if (!sel || !this.selection.active) return;
 
@@ -602,6 +765,370 @@ export class TerminalHost {
         ctx.fillRect(x, y, 2, cellHeight);
         break;
     }
+  }
+
+  // =========================================================================
+  // URL detection and interaction
+  // =========================================================================
+
+  private getUrlAtPosition(screenRow: number, col: number): string | null {
+    const osc8 = this.core.virtualCanvas.getUrlAt(screenRow, col);
+    if (osc8) return osc8;
+    return this.autoDetectUrlAt(screenRow, col)?.url ?? null;
+  }
+
+  private autoDetectUrlAt(screenRow: number, col: number): { url: string; startCol: number; endCol: number } | null {
+    const rowText = this.core.virtualCanvas.getActiveRowText(screenRow);
+    const re = /https?:\/\/[^\s\x00-\x1f\x7f"<>{}|\\^`[\]]+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rowText)) !== null) {
+      // Trim trailing punctuation that commonly trails URLs
+      const url = m[0].replace(/[.,;:!?()'"]+$/, "");
+      const startCol = m.index;
+      const endCol = startCol + url.length;
+      if (col >= startCol && col < endCol) {
+        return { url, startCol, endCol };
+      }
+    }
+    return null;
+  }
+
+  private detectHoveredUrl(screenRow: number, col: number): void {
+    const vc = this.core.virtualCanvas;
+
+    // Check OSC 8 URL first — find the contiguous span of the same URL ID
+    const urlId = vc.getUrlId(screenRow, col);
+    if (urlId !== 0) {
+      let start = col, end = col + 1;
+      while (start > 0 && vc.getUrlId(screenRow, start - 1) === urlId) start--;
+      while (end < this.cols && vc.getUrlId(screenRow, end) === urlId) end++;
+      const url = vc.getUrlStr(urlId);
+      this.setHoveredUrl(url, screenRow, start, end);
+      return;
+    }
+
+    // Fall back to auto-detect
+    const detected = this.autoDetectUrlAt(screenRow, col);
+    if (detected) {
+      this.setHoveredUrl(detected.url, screenRow, detected.startCol, detected.endCol);
+      return;
+    }
+
+    this.clearHoveredUrl();
+  }
+
+  private setHoveredUrl(url: string, row: number, startCol: number, endCol: number): void {
+    const changed = url !== this.hoveredUrl || row !== this.hoveredUrlRow
+                    || startCol !== this.hoveredUrlStartCol;
+    this.hoveredUrl = url;
+    this.hoveredUrlRow = row;
+    this.hoveredUrlStartCol = startCol;
+    this.hoveredUrlEndCol = endCol;
+    (this.cursorCanvas ?? this.textCanvas).style.cursor = "pointer";
+    if (changed) this.scheduleOverlayDraw();
+  }
+
+  private clearHoveredUrl(): void {
+    if (this.hoveredUrl === null) return;
+    this.hoveredUrl = null;
+    this.hoveredUrlRow = -1;
+    this.hoveredUrlStartCol = -1;
+    this.hoveredUrlEndCol = -1;
+    (this.cursorCanvas ?? this.textCanvas).style.cursor = "";
+    this.scheduleOverlayDraw();
+  }
+
+  private showContextMenu(x: number, y: number, url?: string): void {
+    this.dismissContextMenu();
+
+    const menu = document.createElement("div");
+    // Will reposition after measuring; start off-screen to measure height
+    menu.style.cssText =
+      "position:fixed;left:-9999px;top:-9999px;z-index:300;" +
+      "background:#2d2d2d;border:1px solid #555;border-radius:4px;" +
+      "font-family:system-ui,sans-serif;font-size:13px;min-width:160px;" +
+      "box-shadow:0 2px 8px rgba(0,0,0,0.5);overflow:hidden;";
+
+    const makeItem = (label: string, action: () => void, disabled = false): HTMLDivElement => {
+      const item = document.createElement("div");
+      item.textContent = label;
+      item.style.cssText = `padding:6px 14px;color:${disabled ? "#666" : "#d4d4d4"};` +
+        `cursor:${disabled ? "default" : "pointer"};`;
+      if (!disabled) {
+        item.addEventListener("mouseenter", () => { item.style.background = "#3a3a3a"; });
+        item.addEventListener("mouseleave", () => { item.style.background = ""; });
+        item.addEventListener("click", () => { action(); this.dismissContextMenu(); });
+      }
+      return item;
+    };
+
+    const makeSeparator = (): HTMLDivElement => {
+      const sep = document.createElement("div");
+      sep.style.cssText = "margin:3px 0;border-top:1px solid #444;";
+      return sep;
+    };
+
+    const hasSelection = this.selection.active;
+    const selectedText = hasSelection ? this.core.getSelectedText(this.selection) : "";
+
+    // Copy (only when selection exists)
+    if (hasSelection) {
+      menu.appendChild(makeItem("Copy", () => {
+        navigator.clipboard.writeText(selectedText);
+        this.selection.clear();
+        this.scheduleOverlayDraw();
+      }));
+    }
+
+    // Paste
+    menu.appendChild(makeItem("Paste", () => {
+      navigator.clipboard.readText().then(text => {
+        if (!text) return;
+        if (this.core.modes.bracketedPaste) {
+          this.onData?.("\x1b[200~" + text + "\x1b[201~");
+        } else {
+          this.onData?.(text);
+        }
+      });
+    }));
+
+    menu.appendChild(makeSeparator());
+
+    // Select All
+    menu.appendChild(makeItem("Select All", () => {
+      this.selection.start(0, 0);
+      this.selection.update(this.cols - 1, this.rows - 1);
+      this.selection.finish();
+      this.scheduleOverlayDraw();
+    }));
+
+    // Search (pre-fills with selected text if any)
+    menu.appendChild(makeItem("Search…", () => {
+      this.openSearch();
+      if (selectedText && this.searchInput) {
+        this.searchInput.value = selectedText;
+        this.runSearch();
+      }
+    }));
+
+    // Clear Scrollback
+    menu.appendChild(makeItem("Clear Scrollback", () => {
+      this.core.clearScrollback();
+      this.scheduleTextDraw();
+      this.scheduleOverlayDraw();
+    }));
+
+    // URL section
+    if (url) {
+      menu.appendChild(makeSeparator());
+      menu.appendChild(makeItem("Open Link", () => {
+        (window as any).__TAURI__.shell.open(url);
+      }));
+      menu.appendChild(makeItem("Copy Link", () => {
+        navigator.clipboard.writeText(url);
+      }));
+    }
+
+    document.body.appendChild(menu);
+    this.contextMenu = menu;
+
+    // Position: prefer below+right, flip if near viewport edge
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const mw = menu.offsetWidth || 180;
+    const mh = menu.offsetHeight || 200;
+    const left = x + mw > vw ? Math.max(0, vw - mw - 4) : x;
+    const top  = y + mh > vh ? Math.max(0, y - mh) : y;
+    menu.style.left = `${left}px`;
+    menu.style.top  = `${top}px`;
+
+    // Dismiss on any click or ESC outside the menu
+    const dismiss = (ev: MouseEvent) => {
+      if (!menu.contains(ev.target as Node)) {
+        this.dismissContextMenu();
+        document.removeEventListener("click", dismiss, true);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", dismiss, true), 0);
+  }
+
+  private dismissContextMenu(): void {
+    this.contextMenu?.remove();
+    this.contextMenu = null;
+  }
+
+  // =========================================================================
+  // Search
+  // =========================================================================
+
+  private openSearch(): void {
+    if (this.searchBar) {
+      this.searchInput?.focus();
+      return;
+    }
+    const container = this.textCanvas.parentElement;
+    if (!container) return;
+
+    const bar = document.createElement("div");
+    bar.style.cssText =
+      "position:absolute;top:0;left:0;right:0;z-index:200;" +
+      "display:flex;align-items:center;gap:4px;padding:4px 8px;" +
+      "background:rgba(30,30,30,0.95);border-bottom:1px solid #444;" +
+      "font-family:system-ui,sans-serif;font-size:13px;box-sizing:border-box;";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Find…";
+    input.style.cssText =
+      "flex:1;background:#2d2d2d;color:#d4d4d4;border:1px solid #555;" +
+      "border-radius:3px;padding:3px 7px;font-size:13px;outline:none;min-width:0;";
+
+    const countEl = document.createElement("span");
+    countEl.style.cssText =
+      "color:#888;font-size:12px;min-width:64px;text-align:right;white-space:nowrap;";
+    countEl.textContent = "No results";
+
+    const makeBtn = (label: string, title: string): HTMLButtonElement => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.title = title;
+      btn.style.cssText =
+        "background:#2d2d2d;color:#888;border:1px solid #555;border-radius:3px;" +
+        "padding:2px 6px;cursor:pointer;font-size:12px;flex-shrink:0;";
+      return btn;
+    };
+
+    const prevBtn = makeBtn("↑", "Previous match (Shift+Enter)");
+    const nextBtn = makeBtn("↓", "Next match (Enter)");
+    const caseBtn = makeBtn("Aa", "Case sensitive");
+    const regexBtn = makeBtn(".*", "Regular expression");
+    const closeBtn = makeBtn("×", "Close (Esc)");
+    closeBtn.style.marginLeft = "4px";
+
+    const syncToggleStyles = () => {
+      caseBtn.style.color  = this.searchCaseSensitive ? "#d4d4d4" : "#888";
+      caseBtn.style.borderColor = this.searchCaseSensitive ? "#569cd6" : "#555";
+      regexBtn.style.color = this.searchRegex ? "#d4d4d4" : "#888";
+      regexBtn.style.borderColor = this.searchRegex ? "#569cd6" : "#555";
+    };
+    syncToggleStyles();
+
+    input.addEventListener("input", () => {
+      if (this.searchDebounceTimer !== null) clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = window.setTimeout(() => this.runSearch(), 80);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); this.closeSearch(); return; }
+      if (e.key === "Enter") { e.preventDefault(); this.navigateMatch(e.shiftKey ? -1 : 1); }
+    });
+
+    prevBtn.addEventListener("click", () => this.navigateMatch(-1));
+    nextBtn.addEventListener("click", () => this.navigateMatch(1));
+
+    caseBtn.addEventListener("click", () => {
+      this.searchCaseSensitive = !this.searchCaseSensitive;
+      syncToggleStyles();
+      this.runSearch();
+    });
+
+    regexBtn.addEventListener("click", () => {
+      this.searchRegex = !this.searchRegex;
+      syncToggleStyles();
+      this.runSearch();
+    });
+
+    closeBtn.addEventListener("click", () => this.closeSearch());
+
+    bar.append(input, countEl, prevBtn, nextBtn, caseBtn, regexBtn, closeBtn);
+    container.appendChild(bar);
+
+    this.searchBar = bar;
+    this.searchInput = input;
+    this.searchCountEl = countEl;
+
+    input.focus();
+  }
+
+  private closeSearch(): void {
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    this.searchBar?.remove();
+    this.searchBar = null;
+    this.searchInput = null;
+    this.searchCountEl = null;
+    this.searchMatches = [];
+    this.searchMatchIndex = -1;
+    this.scheduleOverlayDraw();
+    this.focus();
+  }
+
+  private runSearch(): void {
+    const query = this.searchInput?.value ?? "";
+    if (!query) {
+      this.searchMatches = [];
+      this.searchMatchIndex = -1;
+      if (this.searchCountEl) this.searchCountEl.textContent = "No results";
+      this.scheduleOverlayDraw();
+      return;
+    }
+
+    this.searchMatches = this.core.search(query, this.searchCaseSensitive, this.searchRegex);
+
+    if (this.searchMatches.length === 0) {
+      this.searchMatchIndex = -1;
+      if (this.searchCountEl) this.searchCountEl.textContent = "No results";
+      this.scheduleOverlayDraw();
+      return;
+    }
+
+    // Jump to the first match at or after the top of the current viewport
+    const sbLen = this.core.scrollbackLength;
+    const firstVisibleAbs = sbLen - this.core.viewportOffset;
+    let bestIdx = 0;
+    for (let i = 0; i < this.searchMatches.length; i++) {
+      if (this.searchMatches[i].absRow >= firstVisibleAbs) { bestIdx = i; break; }
+    }
+    this.searchMatchIndex = bestIdx;
+    this.scrollToMatch(bestIdx);
+    this.updateSearchCount();
+    this.scheduleOverlayDraw();
+  }
+
+  private navigateMatch(delta: number): void {
+    if (this.searchMatches.length === 0) return;
+    const n = this.searchMatches.length;
+    this.searchMatchIndex = ((this.searchMatchIndex + delta) % n + n) % n;
+    this.scrollToMatch(this.searchMatchIndex);
+    this.updateSearchCount();
+    this.scheduleOverlayDraw();
+  }
+
+  private scrollToMatch(index: number): void {
+    const match = this.searchMatches[index];
+    if (!match) return;
+    const sbLen = this.core.scrollbackLength;
+
+    let targetOffset: number;
+    if (match.absRow < sbLen) {
+      // Scrollback: center the match in the viewport
+      targetOffset = Math.max(0, Math.min(sbLen, sbLen - match.absRow + Math.floor(this.rows / 2)));
+    } else {
+      // Active buffer: reset to live view
+      targetOffset = 0;
+    }
+
+    this.core.scrollViewport(targetOffset - this.core.viewportOffset);
+    this.scheduleTextDraw();
+  }
+
+  private updateSearchCount(): void {
+    if (!this.searchCountEl) return;
+    const n = this.searchMatches.length;
+    this.searchCountEl.textContent =
+      n === 0 ? "No results" : `${this.searchMatchIndex + 1} of ${n}`;
   }
 
   // =========================================================================

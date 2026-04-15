@@ -92,6 +92,9 @@ export class Screen implements ParserHandler {
   // Last printed character (for REP)
   private lastChar = "";
 
+  // OSC 8 hyperlink — active URL ID (0 = no URL)
+  private currentUrlId = 0;
+
   constructor(cols: number, rows: number, vc: VirtualCanvas) {
     this.cols = cols;
     this.rows = rows;
@@ -214,9 +217,11 @@ export class Screen implements ParserHandler {
 
     const printAttrs = this.curAttrs | (wide ? WIDE : 0);
     this.vc.setCell(this.cursorY, this.cursorX, char, this.curFg, this.curBg, printAttrs, this.curUlColor);
+    if (this.currentUrlId !== 0) this.vc.setUrl(this.cursorY, this.cursorX, this.currentUrlId);
 
     if (wide && this.cursorX + 1 < this.cols) {
       this.vc.setCell(this.cursorY, this.cursorX + 1, "", this.curFg, this.curBg, this.curAttrs, this.curUlColor);
+      if (this.currentUrlId !== 0) this.vc.setUrl(this.cursorY, this.cursorX + 1, this.currentUrlId);
     }
 
     const advance = wide ? 2 : 1;
@@ -466,7 +471,14 @@ export class Screen implements ParserHandler {
         // Marks: A=prompt start, B=command start, C=output start, D=command done
         this.onShellIntegration?.(payload.charAt(0), payload.length > 1 ? payload.substring(2) : undefined);
         break;
-      // OSC 8 hyperlinks — not yet supported
+      case 8: {
+        // OSC 8 ; params ; uri — hyperlink
+        // payload = "params;uri" (we already stripped "8;")
+        const semi2 = payload.indexOf(";");
+        const uri = semi2 >= 0 ? payload.substring(semi2 + 1) : "";
+        this.currentUrlId = uri ? this.vc.internUrl(uri) : 0;
+        break;
+      }
     }
   }
 
@@ -1007,6 +1019,7 @@ export class Screen implements ParserHandler {
   // Full reset (RIS)
   // ========================================================================
   private fullReset() {
+    this.currentUrlId = 0;
     this.curFg = DEFAULT_COLOR;
     this.curBg = DEFAULT_COLOR;
     this.curAttrs = 0;

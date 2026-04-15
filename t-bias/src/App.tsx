@@ -1,23 +1,80 @@
-import { createSignal, For, Show, onMount, onCleanup, type Component } from "solid-js";
-import TerminalView from "./Terminal";
+import {
+  createSignal,
+  For,
+  Show,
+  onMount,
+  onCleanup,
+  type Component,
+} from "solid-js";
+import { createStore, produce } from "solid-js/store";
+import { PanesRoot } from "./Panes";
+import {
+  splitPane,
+  closePane,
+  terminalIds,
+  findAdjacent,
+  type PaneMap,
+} from "./pane-tree";
 import { GET_CONFIG_CMD, type AppConfig } from "./ipc/types";
 
 const { invoke } = (window as any).__TAURI__.core;
 
 // ---------------------------------------------------------------------------
+// IDs
+// ---------------------------------------------------------------------------
+
+let nextId = 1;
+const newId = () => nextId++;
+
+// ---------------------------------------------------------------------------
 // Tab state
 // ---------------------------------------------------------------------------
 
-interface Tab {
+interface TabState {
   id: number;
+  /** Title of the active pane (updated via OSC 0/2). Fallback: "Shell". */
   title: string;
-  /** Received output while not focused — show activity indicator. */
   hasActivity: boolean;
+  rootId: number;
+  activePaneId: number;
+  panes: PaneMap;
+  /** Per-pane title cache (so switching panes restores the right title). */
+  paneTitles: Record<number, string>;
+  /** When true, the active pane fills the entire tab area. */
+  zoomed: boolean;
 }
 
-let nextTabId = 1;
+function makeInitialTab(): TabState {
+  const tabId = newId();
+  const paneId = newId();
+  return {
+    id: tabId,
+    title: "Shell",
+    hasActivity: false,
+    rootId: paneId,
+    activePaneId: paneId,
+    panes: { [paneId]: { type: "terminal", id: paneId } },
+    paneTitles: { [paneId]: "Shell" },
+    zoomed: false,
+  };
+}
 
-const TAB_BAR_H = 30; // px
+function makeNewTab(): TabState {
+  const tabId = newId();
+  const paneId = newId();
+  return {
+    id: tabId,
+    title: "Shell",
+    hasActivity: false,
+    rootId: paneId,
+    activePaneId: paneId,
+    panes: { [paneId]: { type: "terminal", id: paneId } },
+    paneTitles: { [paneId]: "Shell" },
+    zoomed: false,
+  };
+}
+
+const TAB_BAR_H = 30;
 
 // ---------------------------------------------------------------------------
 // App
@@ -25,66 +82,147 @@ const TAB_BAR_H = 30; // px
 
 const App: Component = () => {
   const [config, setConfig] = createSignal<AppConfig | null>(null);
-  const [tabs, setTabs] = createSignal<Tab[]>([
-    { id: nextTabId++, title: "Shell", hasActivity: false },
-  ]);
-  const [activeTabId, setActiveTabId] = createSignal<number>(tabs()[0].id);
+  const [tabs, setTabs] = createStore<TabState[]>([makeInitialTab()]);
+  const [activeTabId, setActiveTabId] = createSignal<number>(tabs[0].id);
 
-  // ---- Tab operations -------------------------------------------------------
+  // Reactive helpers
+  const tabIdx = () => tabs.findIndex((t) => t.id === activeTabId());
+  const tab = () => tabs[tabIdx()];
+
+  // ── Tab operations ──────────────────────────────────────────────────────
 
   const addTab = () => {
-    const id = nextTabId++;
-    setTabs((t) => [...t, { id, title: "Shell", hasActivity: false }]);
-    setActiveTabId(id);
+    const t = makeNewTab();
+    setTabs((prev) => [...prev, t]);
+    setActiveTabId(t.id);
   };
 
   const switchTab = (id: number) => {
     setActiveTabId(id);
-    // Clear activity indicator when the user switches to that tab.
-    setTabs((t) =>
-      t.map((tab) => (tab.id === id ? { ...tab, hasActivity: false } : tab)),
-    );
+    const idx = tabs.findIndex((t) => t.id === id);
+    if (idx >= 0) setTabs(idx, "hasActivity", false);
   };
 
-  const closeTab = (id: number) => {
-    const current = tabs();
-    if (current.length === 1) return; // never close the last tab
+  /** Close the entire tab (removes it from the list). */
+  const removeTab = (id: number) => {
+    const current = tabs.slice();
+    if (current.length === 1) return;
     const idx = current.findIndex((t) => t.id === id);
     if (id === activeTabId()) {
-      // Switch to the nearest remaining tab.
       const next = idx > 0 ? current[idx - 1] : current[idx + 1];
       setActiveTabId(next.id);
-      setTabs((t) =>
-        t.map((tab) =>
-          tab.id === next.id ? { ...tab, hasActivity: false } : tab,
-        ),
-      );
     }
-    setTabs((t) => t.filter((tab) => tab.id !== id));
-    // TerminalView's onCleanup fires when the component is removed from the
-    // For-list, which calls CLOSE_TAB_CMD and disposes the TerminalHost.
+    setTabs((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const handleTitleChange = (id: number, title: string) => {
-    setTabs((t) =>
-      t.map((tab) => (tab.id === id ? { ...tab, title } : tab)),
+  // ── Pane operations ─────────────────────────────────────────────────────
+
+  const splitActivePane = (dir: "h" | "v") => {
+    const t = tab();
+    if (!t || t.zoomed) return;
+
+    const splitId = newId();
+    const newLeafId = newId();
+    const { panes: newPanes, rootId: newRootId } = splitPane(
+      t.panes,
+      t.rootId,
+      t.activePaneId,
+      dir,
+      splitId,
+      newLeafId,
     );
+
+    const idx = tabIdx();
+    setTabs(idx, produce((draft) => {
+      draft.panes = newPanes;
+      draft.rootId = newRootId;
+      draft.activePaneId = newLeafId;
+      draft.paneTitles[newLeafId] = "Shell";
+    }));
   };
 
-  const handleActivity = (id: number) => {
-    if (id !== activeTabId()) {
-      setTabs((t) =>
-        t.map((tab) => (tab.id === id ? { ...tab, hasActivity: true } : tab)),
-      );
+  /** Close the active pane. If it's the last pane in the tab, close the tab. */
+  const closeActivePane = () => {
+    const t = tab();
+    if (!t) return;
+
+    const leaves = terminalIds(t.panes, t.rootId);
+    if (leaves.length <= 1) {
+      removeTab(t.id);
+      return;
+    }
+
+    if (t.zoomed) {
+      // Exit zoom first, then close
+      setTabs(tabIdx(), "zoomed", false);
+      return;
+    }
+
+    const { panes: newPanes, rootId: newRootId, focusId } = closePane(
+      t.panes,
+      t.rootId,
+      t.activePaneId,
+    );
+
+    const idx = tabIdx();
+    setTabs(idx, produce((draft) => {
+      draft.panes = newPanes;
+      draft.rootId = newRootId;
+      draft.activePaneId = focusId;
+      draft.title = draft.paneTitles[focusId] ?? "Shell";
+      delete draft.paneTitles[t.activePaneId];
+    }));
+  };
+
+  const activatePane = (paneId: number) => {
+    const idx = tabIdx();
+    setTabs(idx, produce((draft) => {
+      draft.activePaneId = paneId;
+      draft.title = draft.paneTitles[paneId] ?? "Shell";
+      draft.hasActivity = false;
+    }));
+  };
+
+  const navigatePane = (dir: "left" | "right" | "up" | "down") => {
+    const t = tab();
+    if (!t || t.zoomed) return;
+    const adjacent = findAdjacent(t.panes, t.rootId, t.activePaneId, dir);
+    if (adjacent !== null) activatePane(adjacent);
+  };
+
+  const toggleZoom = () => {
+    const idx = tabIdx();
+    setTabs(idx, "zoomed", (z) => !z);
+  };
+
+  const handleRatioChange = (splitId: number, ratio: number) => {
+    const idx = tabIdx();
+    setTabs(idx, "panes", splitId as any, "ratio" as any, ratio);
+  };
+
+  const handleTitleChange = (tabId: number, paneId: number, title: string) => {
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    setTabs(idx, produce((draft) => {
+      draft.paneTitles[paneId] = title;
+      if (draft.activePaneId === paneId) draft.title = title;
+    }));
+  };
+
+  const handleActivity = (tabId: number, paneId: number) => {
+    const t = tabs.find((t) => t.id === tabId);
+    if (!t || t.activePaneId === paneId) return;
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (tabId !== activeTabId()) {
+      setTabs(idx, "hasActivity", true);
     }
   };
 
-  // ---- Global keyboard shortcuts -------------------------------------------
-  // Runs in capture phase so it intercepts before TerminalHost sees the event.
+  // ── Global keyboard shortcuts ──────────────────────────────────────────
+  // Capture phase: intercepts before TerminalHost handles the event.
 
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
     if (!e.metaKey) return;
-
     const key = e.key.toLowerCase();
 
     // Cmd+T — new tab
@@ -94,45 +232,78 @@ const App: Component = () => {
       return;
     }
 
-    // Cmd+W — close current tab
+    // Cmd+W — close active pane (or tab if it's the last pane)
     if (key === "w" && !e.shiftKey && !e.altKey) {
       e.preventDefault();
-      closeTab(activeTabId());
+      closeActivePane();
       return;
     }
 
-    // Cmd+1-9 — switch to tab by index
+    // Cmd+D — split side-by-side (horizontal)
+    if (key === "d" && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      splitActivePane("h");
+      return;
+    }
+
+    // Cmd+Shift+D — split stacked (vertical)
+    if (key === "d" && e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      splitActivePane("v");
+      return;
+    }
+
+    // Cmd+Shift+Enter — toggle zoom
+    if (e.key === "Enter" && e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      toggleZoom();
+      return;
+    }
+
+    // Cmd+1-9 — switch tabs
     const digit = parseInt(e.key, 10);
     if (!isNaN(digit) && digit >= 1 && digit <= 9 && !e.shiftKey && !e.altKey) {
-      const t = tabs();
-      if (digit - 1 < t.length) {
+      if (digit - 1 < tabs.length) {
         e.preventDefault();
-        switchTab(t[digit - 1].id);
+        switchTab(tabs[digit - 1].id);
       }
       return;
     }
 
-    // Cmd+Shift+[ — previous tab  (Shift+[ → key is "{")
+    // Cmd+Shift+[ — previous tab
     if (e.code === "BracketLeft" && e.shiftKey && !e.altKey) {
       e.preventDefault();
-      const t = tabs();
-      const idx = t.findIndex((tab) => tab.id === activeTabId());
-      if (idx > 0) switchTab(t[idx - 1].id);
+      const idx = tabs.findIndex((t) => t.id === activeTabId());
+      if (idx > 0) switchTab(tabs[idx - 1].id);
       return;
     }
 
-    // Cmd+Shift+] — next tab  (Shift+] → key is "}")
+    // Cmd+Shift+] — next tab
     if (e.code === "BracketRight" && e.shiftKey && !e.altKey) {
       e.preventDefault();
-      const t = tabs();
-      const idx = t.findIndex((tab) => tab.id === activeTabId());
-      if (idx < t.length - 1) switchTab(t[idx + 1].id);
+      const idx = tabs.findIndex((t) => t.id === activeTabId());
+      if (idx < tabs.length - 1) switchTab(tabs[idx + 1].id);
       return;
+    }
+
+    // Cmd+Option+Arrow — navigate panes
+    if (e.altKey && !e.shiftKey) {
+      const dirs: Record<string, "left" | "right" | "up" | "down"> = {
+        ArrowLeft: "left",
+        ArrowRight: "right",
+        ArrowUp: "up",
+        ArrowDown: "down",
+      };
+      const dir = dirs[e.key];
+      if (dir) {
+        e.preventDefault();
+        navigatePane(dir);
+        return;
+      }
     }
   };
 
   onMount(async () => {
-    // Fetch config once; all tabs share the same configuration.
     const cfg = (await invoke(GET_CONFIG_CMD)) as AppConfig;
     setConfig(cfg);
     window.addEventListener("keydown", handleGlobalKeyDown, { capture: true });
@@ -142,38 +313,30 @@ const App: Component = () => {
     window.removeEventListener("keydown", handleGlobalKeyDown, { capture: true });
   });
 
-  // ---- Render ---------------------------------------------------------------
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <Show when={config()}>
-      <div
-        style={{
+      <div style={{ display: "flex", "flex-direction": "column", width: "100%", height: "100%" }}>
+
+        {/* ── Tab bar ──────────────────────────────────────────────────── */}
+        <div style={{
+          height: `${TAB_BAR_H}px`,
+          "flex-shrink": "0",
+          background: "#141414",
           display: "flex",
-          "flex-direction": "column",
-          width: "100%",
-          height: "100%",
-        }}
-      >
-        {/* ── Tab bar ─────────────────────────────────────────────────────── */}
-        <div
-          style={{
-            height: `${TAB_BAR_H}px`,
-            "flex-shrink": "0",
-            background: "#141414",
-            display: "flex",
-            "align-items": "stretch",
-            overflow: "hidden",
-            "border-bottom": "1px solid #2a2a2a",
-            "user-select": "none",
-          }}
-        >
-          <For each={tabs()}>
-            {(tab) => {
-              const isActive = () => tab.id === activeTabId();
+          "align-items": "stretch",
+          overflow: "hidden",
+          "border-bottom": "1px solid #2a2a2a",
+          "user-select": "none",
+        }}>
+          <For each={tabs}>
+            {(t) => {
+              const isActive = () => t.id === activeTabId();
               return (
                 <div
-                  onClick={() => switchTab(tab.id)}
-                  title={tab.title}
+                  onClick={() => switchTab(t.id)}
+                  title={t.title}
                   style={{
                     display: "flex",
                     "align-items": "center",
@@ -182,45 +345,24 @@ const App: Component = () => {
                     cursor: "default",
                     "font-family": "Menlo, Monaco, 'Courier New', monospace",
                     "font-size": "11px",
-                    color: isActive()
-                      ? "#e0e0e0"
-                      : tab.hasActivity
-                        ? "#7eadff"
-                        : "#666",
+                    color: isActive() ? "#e0e0e0" : t.hasActivity ? "#7eadff" : "#666",
                     background: isActive() ? "#1e1e1e" : "transparent",
                     "border-right": "1px solid #222",
                     "box-shadow": isActive() ? "inset 0 -2px 0 #5b8aff" : "none",
                     "min-width": "72px",
                     "max-width": "180px",
-                    position: "relative",
                     "flex-shrink": "0",
+                    position: "relative",
                   }}
                 >
-                  {/* Activity dot */}
-                  <Show when={tab.hasActivity && !isActive()}>
-                    <span style={{ color: "#7eadff", "font-size": "8px", "flex-shrink": "0" }}>
-                      ●
-                    </span>
+                  <Show when={t.hasActivity && !isActive()}>
+                    <span style={{ color: "#7eadff", "font-size": "8px", "flex-shrink": "0" }}>●</span>
                   </Show>
-
-                  {/* Tab title */}
-                  <span
-                    style={{
-                      flex: "1",
-                      overflow: "hidden",
-                      "text-overflow": "ellipsis",
-                      "white-space": "nowrap",
-                    }}
-                  >
-                    {tab.title}
+                  <span style={{ flex: "1", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
+                    {t.title}
                   </span>
-
-                  {/* Close button */}
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeTab(tab.id);
-                    }}
+                    onClick={(e) => { e.stopPropagation(); removeTab(t.id); }}
                     title="Close tab"
                     style={{
                       background: "none",
@@ -232,17 +374,14 @@ const App: Component = () => {
                       "line-height": "1",
                       "border-radius": "3px",
                       "flex-shrink": "0",
-                      opacity: tabs().length === 1 ? "0.2" : "1",
+                      opacity: tabs.length === 1 ? "0.2" : "1",
                     }}
-                  >
-                    ×
-                  </button>
+                  >×</button>
                 </div>
               );
             }}
           </For>
 
-          {/* New tab button */}
           <button
             onClick={addTab}
             title="New tab (⌘T)"
@@ -257,39 +396,37 @@ const App: Component = () => {
               "flex-shrink": "0",
               "align-self": "center",
             }}
-          >
-            +
-          </button>
+          >+</button>
         </div>
 
-        {/* ── Terminal panels ─────────────────────────────────────────────── */}
-        {/* All tabs stay mounted so their PTYs keep running; only the active  */}
-        {/* one is visible. `visibility:hidden` keeps layout intact so fit()   */}
-        {/* continues to work correctly on hidden terminals.                   */}
+        {/* ── Terminal panels ──────────────────────────────────────────── */}
+        {/* All tabs stay mounted (PTYs keep running); inactive ones are   */}
+        {/* hidden with `visibility:hidden` so layout + fit() still work.  */}
         <div style={{ flex: "1", position: "relative", overflow: "hidden" }}>
-          <For each={tabs()}>
-            {(tab) => (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: "0",
-                  visibility:
-                    tab.id === activeTabId() ? "visible" : "hidden",
-                  "pointer-events":
-                    tab.id === activeTabId() ? "auto" : "none",
-                }}
-              >
-                <TerminalView
-                  tabId={tab.id}
+          <For each={tabs}>
+            {(t) => (
+              <div style={{
+                position: "absolute",
+                inset: "0",
+                visibility: t.id === activeTabId() ? "visible" : "hidden",
+                "pointer-events": t.id === activeTabId() ? "auto" : "none",
+              }}>
+                <PanesRoot
+                  rootId={t.rootId}
+                  panes={t.panes}
+                  activePaneId={t.activePaneId}
                   config={config()!}
-                  isActive={tab.id === activeTabId()}
-                  onTitleChange={(title) => handleTitleChange(tab.id, title)}
-                  onActivity={() => handleActivity(tab.id)}
+                  zoomed={t.zoomed}
+                  onActivate={(paneId) => activatePane(paneId)}
+                  onTitleChange={(paneId, title) => handleTitleChange(t.id, paneId, title)}
+                  onActivity={(paneId) => handleActivity(t.id, paneId)}
+                  onRatioChange={(splitId, ratio) => handleRatioChange(splitId, ratio)}
                 />
               </div>
             )}
           </For>
         </div>
+
       </div>
     </Show>
   );

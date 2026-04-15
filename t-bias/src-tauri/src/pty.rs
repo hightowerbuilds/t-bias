@@ -7,19 +7,19 @@ use tauri::{AppHandle, Emitter};
 /// Maximum bytes to read in a single syscall.
 const READ_BUF_SIZE: usize = 65536; // 64KB
 
-struct TabPty {
+struct PaneState {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
 }
 
 pub struct PtyState {
-    tabs: Mutex<HashMap<u32, TabPty>>,
+    panes: Mutex<HashMap<u32, PaneState>>,
 }
 
 impl PtyState {
     pub fn new() -> Self {
         Self {
-            tabs: Mutex::new(HashMap::new()),
+            panes: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -28,7 +28,7 @@ impl PtyState {
 pub fn spawn_shell(
     app: AppHandle,
     state: tauri::State<'_, PtyState>,
-    tab_id: u32,
+    pane_id: u32,
     cols: u16,
     rows: u16,
     shell: Option<String>,
@@ -58,13 +58,13 @@ pub fn spawn_shell(
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
 
     {
-        let mut tabs = state.tabs.lock().map_err(|e| e.to_string())?;
-        tabs.insert(tab_id, TabPty { writer, master: pair.master });
+        let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
+        panes.insert(pane_id, PaneState { writer, master: pair.master });
     }
 
-    // Reader thread: streams PTY output to the frontend via tab-specific event.
+    // Reader thread: streams PTY output to the frontend via pane-specific event.
     let app_clone = app.clone();
-    let out_event = format!("pty-output-{}", tab_id);
+    let out_event = format!("pty-output-{}", pane_id);
     std::thread::spawn(move || {
         let mut buf = vec![0u8; READ_BUF_SIZE];
         loop {
@@ -79,8 +79,8 @@ pub fn spawn_shell(
         }
     });
 
-    // Child wait thread: notifies frontend when this tab's process exits.
-    let exit_event = format!("pty-exit-{}", tab_id);
+    // Child wait thread: notifies frontend when this pane's process exits.
+    let exit_event = format!("pty-exit-{}", pane_id);
     std::thread::spawn(move || {
         let _ = child.wait();
         let _ = app.emit(&exit_event, ());
@@ -92,15 +92,15 @@ pub fn spawn_shell(
 #[tauri::command]
 pub fn write_to_pty(
     state: tauri::State<'_, PtyState>,
-    tab_id: u32,
+    pane_id: u32,
     data: String,
 ) -> Result<(), String> {
-    let mut tabs = state.tabs.lock().map_err(|e| e.to_string())?;
-    if let Some(tab) = tabs.get_mut(&tab_id) {
-        tab.writer
+    let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
+    if let Some(pane) = panes.get_mut(&pane_id) {
+        pane.writer
             .write_all(data.as_bytes())
             .map_err(|e| e.to_string())?;
-        tab.writer.flush().map_err(|e| e.to_string())?;
+        pane.writer.flush().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -108,13 +108,13 @@ pub fn write_to_pty(
 #[tauri::command]
 pub fn resize_pty(
     state: tauri::State<'_, PtyState>,
-    tab_id: u32,
+    pane_id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let tabs = state.tabs.lock().map_err(|e| e.to_string())?;
-    if let Some(tab) = tabs.get(&tab_id) {
-        tab.master
+    let panes = state.panes.lock().map_err(|e| e.to_string())?;
+    if let Some(pane) = panes.get(&pane_id) {
+        pane.master
             .resize(PtySize {
                 rows,
                 cols,
@@ -126,14 +126,14 @@ pub fn resize_pty(
     Ok(())
 }
 
-/// Drop a tab's PTY, killing the child process and freeing resources.
+/// Drop a pane's PTY, killing the child process and freeing resources.
 /// The reader thread will notice the closed master fd and exit naturally.
 #[tauri::command]
-pub fn close_tab(
+pub fn close_pane(
     state: tauri::State<'_, PtyState>,
-    tab_id: u32,
+    pane_id: u32,
 ) -> Result<(), String> {
-    let mut tabs = state.tabs.lock().map_err(|e| e.to_string())?;
-    tabs.remove(&tab_id);
+    let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
+    panes.remove(&pane_id);
     Ok(())
 }

@@ -1,7 +1,7 @@
 import { onMount, onCleanup, createSignal, createEffect, type Component } from "solid-js";
 import { TerminalHost } from "./terminal/TerminalHost";
 import {
-  SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD, CLOSE_TAB_CMD,
+  SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD, CLOSE_PANE_CMD,
   type AppConfig,
 } from "./ipc/types";
 
@@ -9,13 +9,14 @@ const { invoke } = (window as any).__TAURI__.core;
 const { listen } = (window as any).__TAURI__.event;
 
 export interface TerminalViewProps {
-  tabId: number;
+  /** Unique pane ID — used as the PTY identifier and event-name suffix. */
+  paneId: number;
   config: AppConfig;
-  /** Whether this tab is currently visible and active. */
+  /** Whether this pane currently has keyboard focus. */
   isActive: boolean;
   /** Called when the shell emits an OSC title change. */
   onTitleChange?: (title: string) => void;
-  /** Called when the terminal receives output while not active (for activity dot). */
+  /** Called when output arrives while the pane is not active. */
   onActivity?: () => void;
 }
 
@@ -43,13 +44,13 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       },
     });
 
-    // Signal that the terminal object exists so the focus effect can fire.
+    // Signal that the terminal object exists so focus/resize can fire.
     setTerminalReady(true);
 
     const { cols, rows } = terminal.gridSize;
 
     terminal.onData = (data) => {
-      invoke(WRITE_TO_PTY_CMD, { tab_id: props.tabId, data });
+      invoke(WRITE_TO_PTY_CMD, { pane_id: props.paneId, data });
     };
 
     terminal.core.onClipboard = (text) => {
@@ -61,7 +62,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
     };
 
     const unlistenOutput = await listen(
-      `pty-output-${props.tabId}`,
+      `pty-output-${props.paneId}`,
       (event: any) => {
         terminal!.write(event.payload as string);
         if (!props.isActive) {
@@ -70,30 +71,34 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       },
     );
 
-    const unlistenExit = await listen(`pty-exit-${props.tabId}`, () => {
+    const unlistenExit = await listen(`pty-exit-${props.paneId}`, () => {
       terminal!.write("\r\n[Process exited]\r\n");
     });
 
     const shell = config.shell || undefined;
-    await invoke(SPAWN_SHELL_CMD, { tab_id: props.tabId, cols, rows, shell });
+    await invoke(SPAWN_SHELL_CMD, { pane_id: props.paneId, cols, rows, shell });
 
     terminal.onResize = (cols, rows) => {
-      invoke(RESIZE_PTY_CMD, { tab_id: props.tabId, cols, rows });
+      invoke(RESIZE_PTY_CMD, { pane_id: props.paneId, cols, rows });
     };
 
-    const onWindowResize = () => terminal?.fit();
-    window.addEventListener("resize", onWindowResize);
+    // ResizeObserver keeps each pane's grid in sync with its container size.
+    // This covers both window resizes and pane-divider drags without needing
+    // a global window.resize handler.
+    const ro = new ResizeObserver(() => terminal?.fit());
+    const container = textCanvasRef.parentElement;
+    if (container) ro.observe(container);
 
     onCleanup(() => {
-      window.removeEventListener("resize", onWindowResize);
+      ro.disconnect();
       unlistenOutput();
       unlistenExit();
       terminal?.dispose();
-      invoke(CLOSE_TAB_CMD, { tab_id: props.tabId }).catch(() => {});
+      invoke(CLOSE_PANE_CMD, { pane_id: props.paneId }).catch(() => {});
     });
   });
 
-  // Focus the terminal whenever this tab becomes active.
+  // Focus the terminal whenever this pane becomes active.
   createEffect(() => {
     if (props.isActive && terminalReady()) {
       terminal!.focus();

@@ -10,7 +10,7 @@ pub fn run() {
             pty::spawn_shell,
             pty::write_to_pty,
             pty::resize_pty,
-            pty::close_tab,
+            pty::close_pane,
             config::get_config,
         ])
         .setup(|app| {

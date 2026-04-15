@@ -6,40 +6,40 @@
 
 // ========================== Commands (frontend → backend) ==========================
 
-/** spawn_shell: Start a PTY for a specific tab. */
+/** spawn_shell: Start a PTY for a specific pane. */
 export interface SpawnShellArgs {
-  tab_id: number;
+  pane_id: number;
   cols: number;
   rows: number;
   shell?: string;
 }
 
-/** write_to_pty: Send data (keystrokes, paste) to a tab's PTY. */
+/** write_to_pty: Send data (keystrokes, paste) to a pane's PTY. */
 export interface WriteToPtyArgs {
-  tab_id: number;
+  pane_id: number;
   data: string;
 }
 
-/** resize_pty: Notify a tab's PTY of a terminal size change. */
+/** resize_pty: Notify a pane's PTY of a terminal size change. */
 export interface ResizePtyArgs {
-  tab_id: number;
+  pane_id: number;
   cols: number;
   rows: number;
 }
 
-/** close_tab: Kill a tab's PTY and free its resources. */
-export interface CloseTabArgs {
-  tab_id: number;
+/** close_pane: Kill a pane's PTY and free its resources. */
+export interface ClosePaneArgs {
+  pane_id: number;
 }
 
 // ========================== Events (backend → frontend) ==========================
 
-/** pty-output-{tabId}: Raw text from a tab's shell process. */
+/** pty-output-{paneId}: Raw text from a pane's shell process. */
 export interface PtyOutputEvent {
   payload: string;
 }
 
-/** pty-exit-{tabId}: A tab's shell process has terminated. */
+/** pty-exit-{paneId}: A pane's shell process has terminated. */
 export interface PtyExitEvent {
   // No payload
 }
@@ -76,8 +76,8 @@ export interface AppConfig {
 
 // ========================== Command names (string constants) ==========================
 
-export const SPAWN_SHELL_CMD = "spawn_shell" as const;
+export const SPAWN_SHELL_CMD  = "spawn_shell"  as const;
 export const WRITE_TO_PTY_CMD = "write_to_pty" as const;
-export const RESIZE_PTY_CMD = "resize_pty" as const;
-export const CLOSE_TAB_CMD = "close_tab" as const;
-export const GET_CONFIG_CMD = "get_config" as const;
+export const RESIZE_PTY_CMD   = "resize_pty"   as const;
+export const CLOSE_PANE_CMD   = "close_pane"   as const;
+export const GET_CONFIG_CMD   = "get_config"   as const;

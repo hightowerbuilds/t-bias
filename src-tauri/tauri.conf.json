@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "t-bias",
+  "productName": "t-Bias Tauri",
   "version": "0.1.0",
   "identifier": "com.tbias.terminal",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "t-bias",
+        "title": "t-Bias Tauri",
         "width": 960,
         "height": 640,
         "resizable": true,

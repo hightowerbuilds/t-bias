@@ -5,6 +5,8 @@ import type { IRenderer, SelectionBounds } from "./IRenderer";
 import type { TerminalOptions, Theme } from "./types";
 import { DEFAULT_THEME } from "./types";
 import { CanvasRenderer } from "./Renderer";
+import { isHtmlInCanvasSupported } from "./htmlInCanvas";
+import { MARK_A } from "./VirtualCanvas";
 
 // ---------------------------------------------------------------------------
 // TerminalHost — DOM-aware orchestrator
@@ -76,6 +78,18 @@ export class TerminalHost {
   private hoveredUrlStartCol = -1;
   private hoveredUrlEndCol = -1;
   private contextMenu: HTMLDivElement | null = null;
+
+  // HTML-in-Canvas integration
+  private htmlInCanvasEnabled = false;
+  // A11y: one invisible <div> per viewport row, children of textCanvas
+  private a11yRows: HTMLDivElement[] = [];
+  // Live-region container for announcing new output to screen readers
+  private a11yContainer: HTMLElement | null = null;
+  // Link pool: reusable <a> elements for OSC 8 URL spans (accessibility only)
+  private linkPool: HTMLAnchorElement[] = [];
+  private activeLinkEls: HTMLAnchorElement[] = [];
+  // Prompt sections: one <section> per viewport row slot for OSC 133 marks
+  private promptSections: HTMLElement[] = [];
 
   // Search
   private searchBar: HTMLDivElement | null = null;
@@ -150,6 +164,39 @@ export class TerminalHost {
 
     // Create overlay canvases (selection + cursor)
     this.createOverlayCanvases();
+
+    // HTML-in-Canvas: opt-in if the browser supports the WICG proposal.
+    // Enables: layoutSubtree children for accessibility, onpaint-driven render loop,
+    // OSC 8 <a> elements for screen readers, OSC 133 <section> prompt anchors.
+    if (isHtmlInCanvasSupported()) {
+      this.htmlInCanvasEnabled = true;
+      this.textCanvas.layoutSubtree = true;
+
+      // Semantic role for the whole terminal
+      this.textCanvas.setAttribute("role", "application");
+      this.textCanvas.setAttribute("aria-label", "Terminal");
+
+      // Build the invisible DOM layers inside textCanvas
+      this.buildA11yRows(this.rows);
+      this.buildPromptSections(this.rows);
+
+      // Off-canvas live region for announcing new output lines
+      this.a11yContainer = document.createElement("div");
+      this.a11yContainer.setAttribute("role", "log");
+      this.a11yContainer.setAttribute("aria-live", "polite");
+      this.a11yContainer.setAttribute("aria-atomic", "false");
+      this.a11yContainer.setAttribute("aria-label", "Terminal output");
+      this.a11yContainer.style.cssText =
+        "position:absolute;width:1px;height:1px;overflow:hidden;" +
+        "clip:rect(0,0,0,0);white-space:nowrap;border:0;padding:0;margin:0;";
+      this.textCanvas.parentElement?.appendChild(this.a11yContainer);
+
+      // Wire onpaint — the browser fires this after intersection-observer
+      // steps, once per rendering cycle that includes DOM child mutations.
+      // We draw pixels here instead of inside the RAF callback so the
+      // browser guarantees DOM layout is settled before we read dirty state.
+      this.textCanvas.onpaint = (e: PaintEvent) => this.onPaintFired(e);
+    }
 
     // Input events on the top-most canvas (or text canvas if overlays not created)
     const inputTarget = this.cursorCanvas ?? this.textCanvas;
@@ -263,6 +310,17 @@ export class TerminalHost {
       this.core.resize(this.cols, this.rows);
       this.renderer.resize(this.cols, this.rows);
       this.resizeOverlayCanvases();
+
+      if (this.htmlInCanvasEnabled) {
+        // Rebuild DOM layers with updated cell dimensions and row count.
+        // buildA11yRows removes old divs and creates new ones sized for the
+        // new cellWidth/cellHeight (renderer.resize has already updated those).
+        this.buildA11yRows(this.rows);
+        this.buildPromptSections(this.rows);
+        // Release pooled links — their pixel positions are now stale.
+        this.releaseAllLinks();
+      }
+
       this.scheduleTextDraw();
       this.scheduleOverlayDraw();
       this.onResize?.(this.cols, this.rows);
@@ -306,6 +364,19 @@ export class TerminalHost {
     this.renderer.dispose();
     this.selectionCanvas?.remove();
     this.cursorCanvas?.remove();
+
+    if (this.htmlInCanvasEnabled) {
+      this.textCanvas.onpaint = null;
+      for (const div of this.a11yRows) div.remove();
+      this.a11yRows = [];
+      for (const el of this.promptSections) el.remove();
+      this.promptSections = [];
+      for (const el of [...this.activeLinkEls, ...this.linkPool]) el.remove();
+      this.activeLinkEls = [];
+      this.linkPool = [];
+      this.a11yContainer?.remove();
+      this.a11yContainer = null;
+    }
   }
 
   // =========================================================================
@@ -593,19 +664,28 @@ export class TerminalHost {
   // =========================================================================
   // Render — Text Layer (via IRenderer)
   // =========================================================================
+
   private scheduleTextDraw() {
+    if (this.htmlInCanvasEnabled) {
+      this.scheduleTextDrawHIC();
+    } else {
+      this.scheduleTextDrawRAF();
+    }
+  }
+
+  // --- Baseline RAF path (non-HIC browsers) ---
+
+  private scheduleTextDrawRAF() {
     if (!this.textDrawQueued) {
       this.textDrawQueued = true;
       requestAnimationFrame(() => {
         this.textDrawQueued = false;
-        // Flush all buffered writes in one parser pass, then render.
         this.flushWriteBuffer();
         this.writesSinceLastFrame = 0;
         this.bytesSinceLastFrame = 0;
         const state = this.core.getRenderState();
         this.renderer.draw(state);
         this.core.virtualCanvas.clearDirty();
-        // Measure input latency: time from last keypress to draw completion
         if (this.lastKeypressTime > 0) {
           this.lastInputLatency = performance.now() - this.lastKeypressTime;
           this.lastKeypressTime = 0;
@@ -613,6 +693,56 @@ export class TerminalHost {
         this.updateDebugOverlay();
       });
     }
+  }
+
+  // --- HTML-in-Canvas path ---
+  //
+  // Flow:
+  //   1. scheduleTextDrawHIC() → coalesces into one RAF, same as before
+  //   2. RAF: flush PTY writes → parse VT → update DOM layers (a11y, links,
+  //      prompts) → call requestPaint() so the browser knows children changed
+  //   3. Browser finishes layout + intersection-observer steps
+  //   4. onpaint fires (browser-gated) → draw pixels → clearDirty
+  //
+  // The key difference from pure RAF: pixels are drawn after the browser has
+  // settled layout for this frame, eliminating the window where a second dirty
+  // mark could slip in between the render-state snapshot and the draw.
+
+  private scheduleTextDrawHIC() {
+    if (!this.textDrawQueued) {
+      this.textDrawQueued = true;
+      requestAnimationFrame(() => {
+        this.textDrawQueued = false;
+
+        // 1. Parse all buffered PTY data — updates VirtualCanvas dirty state.
+        this.flushWriteBuffer();
+        this.writesSinceLastFrame = 0;
+        this.bytesSinceLastFrame = 0;
+        if (this.lastKeypressTime > 0) {
+          this.lastInputLatency = performance.now() - this.lastKeypressTime;
+          this.lastKeypressTime = 0;
+        }
+
+        // 2. Sync DOM layers (causes browser layout recalculate).
+        //    These are the DOM mutations that trigger onpaint.
+        this.syncA11yLayer();
+        this.syncLinkLayer();
+        this.syncPromptAnchors();
+
+        // 3. Ask the browser to fire onpaint after layout/intersection-observer.
+        //    onPaintFired() will draw pixels and clear the dirty bitmap.
+        this.textCanvas.requestPaint();
+      });
+    }
+  }
+
+  private onPaintFired(_e: PaintEvent) {
+    // The browser has processed layout for all child mutations made in the RAF.
+    // The dirty bitmap now reflects a stable post-layout state — safe to draw.
+    const state = this.core.getRenderState();
+    this.renderer.draw(state);
+    this.core.virtualCanvas.clearDirty();
+    this.updateDebugOverlay();
   }
 
   // =========================================================================
@@ -1223,7 +1353,208 @@ export class TerminalHost {
       `hit:   ${(m.atlasHitRate * 100).toFixed(1)}%\n` +
       `dpr:   ${this.dpr}\n` +
       `input: ${this.lastInputLatency > 0 ? this.lastInputLatency.toFixed(1) + "ms" : "—"}\n` +
-      `io:    ${this.formatBytes(throughput)}`;
+      `io:    ${this.formatBytes(throughput)}\n` +
+      `hic:   ${this.htmlInCanvasEnabled ? "on" : "off"}`;
+  }
+
+  // =========================================================================
+  // HTML-in-Canvas — A11y layer
+  // =========================================================================
+  // Invisible <div> children of textCanvas.  Each maps to one viewport row.
+  // They exist purely for the browser's accessibility tree — screen readers
+  // navigate them and read the text content.  We never call drawElementImage
+  // on these; the GlyphAtlas still paints the visible pixels.
+
+  private buildA11yRows(rowCount: number) {
+    for (const div of this.a11yRows) div.remove();
+    this.a11yRows = [];
+
+    const { cellWidth, cellHeight } = this.renderer;
+
+    for (let r = 0; r < rowCount; r++) {
+      const div = document.createElement("div");
+      div.setAttribute("aria-hidden", "false");
+      div.style.cssText = [
+        "position:absolute",
+        `top:${r * cellHeight}px`,
+        "left:0",
+        `width:${this.cols * cellWidth}px`,
+        `height:${cellHeight}px`,
+        "white-space:pre",
+        // Visually invisible but in the accessibility tree:
+        "color:transparent",
+        "pointer-events:none",
+        "user-select:none",
+        `font-family:${this.renderer instanceof CanvasRenderer
+          ? (this.renderer as any).fontFamily ?? "monospace"
+          : "monospace"}`,
+        `font-size:${this.fontSize}px`,
+        `line-height:${cellHeight}px`,
+      ].join(";");
+      this.textCanvas.appendChild(div);
+      this.a11yRows.push(div);
+    }
+  }
+
+  private syncA11yLayer() {
+    if (!this.htmlInCanvasEnabled) return;
+    const vc = this.core.virtualCanvas;
+    const { cellWidth, cellHeight } = this.renderer;
+
+    for (let r = 0; r < this.rows; r++) {
+      const div = this.a11yRows[r];
+      if (!div) continue;
+
+      // Only update rows that the VT emulator dirtied this frame.
+      // dirtyBitmap is read BEFORE clearDirty() so it still reflects changes.
+      if (!vc.dirtyBitmap[r] && div.dataset.synced === "1") continue;
+
+      div.textContent = vc.getActiveRowText(r);
+      div.dataset.synced = "1";
+
+      // Re-apply geometry in case of font/resize changes
+      div.style.top = `${r * cellHeight}px`;
+      div.style.width = `${this.cols * cellWidth}px`;
+      div.style.height = `${cellHeight}px`;
+      div.style.fontSize = `${this.fontSize}px`;
+      div.style.lineHeight = `${cellHeight}px`;
+    }
+  }
+
+  // =========================================================================
+  // HTML-in-Canvas — OSC 8 link layer (accessibility)
+  // =========================================================================
+  // Reusable <a> elements positioned over OSC 8 URL spans.  They are children
+  // of textCanvas (participating in layoutSubtree accessibility tree) but are
+  // visually transparent.  Mouse interaction still uses the existing
+  // detectHoveredUrl / handleMouseDown path because cursorCanvas sits on top.
+  // Screen readers, however, see the <a> elements and can activate them.
+
+  private acquireLink(): HTMLAnchorElement {
+    let el = this.linkPool.pop();
+    if (!el) {
+      el = document.createElement("a");
+      el.style.cssText = [
+        "position:absolute",
+        "display:block",
+        "color:transparent",
+        "text-decoration:none",
+        "cursor:pointer",
+        "pointer-events:none",  // cursorCanvas intercepts mouse; this is a11y-only
+      ].join(";");
+      this.textCanvas.appendChild(el);
+    }
+    return el;
+  }
+
+  private releaseAllLinks() {
+    for (const el of this.activeLinkEls) {
+      el.style.display = "none";
+      this.linkPool.push(el);
+    }
+    this.activeLinkEls = [];
+  }
+
+  private syncLinkLayer() {
+    if (!this.htmlInCanvasEnabled) return;
+    const modes = this.core.modes;
+
+    // Links only relevant in live view of the main screen
+    if (modes.isAlternateScreen || this.core.viewportOffset !== 0) {
+      this.releaseAllLinks();
+      return;
+    }
+
+    this.releaseAllLinks();
+
+    const vc = this.core.virtualCanvas;
+    const { cellWidth, cellHeight } = this.renderer;
+
+    for (let r = 0; r < this.rows; r++) {
+      let spanStart = -1;
+      let spanId = 0;
+
+      for (let c = 0; c <= this.cols; c++) {
+        const id = c < this.cols ? vc.getUrlId(r, c) : 0;
+
+        if (id !== spanId) {
+          // Flush the completed span
+          if (spanId !== 0 && spanStart >= 0) {
+            const url = vc.getUrlStr(spanId);
+            if (url) {
+              const el = this.acquireLink();
+              el.href = url;
+              el.setAttribute("aria-label", url);
+              el.title = url;
+              el.style.display = "block";
+              el.style.left = `${spanStart * cellWidth}px`;
+              el.style.top = `${r * cellHeight}px`;
+              el.style.width = `${(c - spanStart) * cellWidth}px`;
+              el.style.height = `${cellHeight}px`;
+              this.activeLinkEls.push(el);
+            }
+          }
+          spanId = id;
+          spanStart = c;
+        }
+      }
+    }
+  }
+
+  // =========================================================================
+  // HTML-in-Canvas — OSC 133 prompt section layer (accessibility)
+  // =========================================================================
+  // One <section> element per viewport row slot.  When a row has a MARK_A
+  // prompt mark, the section is made visible and labelled; otherwise hidden.
+  // Screen readers announce "Shell prompt" at each prompt position.
+  // Visual exit-status bars remain in drawSelectionLayer (unchanged).
+
+  private buildPromptSections(rowCount: number) {
+    for (const el of this.promptSections) el.remove();
+    this.promptSections = [];
+
+    const { cellWidth, cellHeight } = this.renderer;
+
+    for (let r = 0; r < rowCount; r++) {
+      const el = document.createElement("section");
+      el.setAttribute("aria-label", "Shell prompt");
+      el.setAttribute("aria-hidden", "true"); // hidden until a prompt is here
+      el.style.cssText = [
+        "position:absolute",
+        `top:${r * cellHeight}px`,
+        "left:0",
+        `width:${this.cols * cellWidth}px`,
+        `height:${cellHeight}px`,
+        "color:transparent",
+        "pointer-events:none",
+      ].join(";");
+      this.textCanvas.appendChild(el);
+      this.promptSections.push(el);
+    }
+  }
+
+  private syncPromptAnchors() {
+    if (!this.htmlInCanvasEnabled) return;
+    if (this.core.modes.isAlternateScreen) return;
+
+    const vc = this.core.virtualCanvas;
+    const { cellWidth, cellHeight } = this.renderer;
+
+    for (let r = 0; r < this.rows; r++) {
+      const el = this.promptSections[r];
+      if (!el) continue;
+
+      const mark = vc.getPromptMark(r);
+      if (mark === MARK_A) {
+        el.setAttribute("aria-hidden", "false");
+        // Keep position in sync with current cell dimensions
+        el.style.top = `${r * cellHeight}px`;
+        el.style.width = `${this.cols * cellWidth}px`;
+        el.style.height = `${cellHeight}px`;
+      } else {
+        el.setAttribute("aria-hidden", "true");
+      }
+    }
   }
 
   // =========================================================================

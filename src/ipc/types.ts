@@ -79,11 +79,23 @@ export interface AppConfig {
   session: ConfigSession;
 }
 
+// ========================== Filesystem ==========================
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified: number | null;
+}
+
 // ========================== Session (layout persistence) ==========================
 
 /** Recursive pane layout — no IDs, freshly assigned on restore. */
 export type SavedPane =
   | { type: "terminal" }
+  | { type: "file-explorer" }
+  | { type: "editor"; filePath?: string }
   | { type: "split"; dir: "h" | "v"; ratio: number; a: SavedPane; b: SavedPane };
 
 export interface SavedTab {
@@ -112,3 +124,12 @@ export const SAVE_NAMED_SESSION_CMD   = "save_named_session"  as const;
 export const LOAD_NAMED_SESSION_CMD   = "load_named_session"  as const;
 export const LIST_NAMED_SESSIONS_CMD  = "list_named_sessions" as const;
 export const DELETE_NAMED_SESSION_CMD = "delete_named_session" as const;
+
+// Filesystem
+export const READ_DIR_CMD             = "read_dir"             as const;
+export const READ_FILE_CMD            = "read_file"            as const;
+export const WRITE_FILE_CMD           = "write_file"           as const;
+export const MOVE_ENTRY_CMD           = "move_entry"           as const;
+export const CREATE_DIR_CMD           = "create_dir"           as const;
+export const DELETE_ENTRY_CMD         = "delete_entry"         as const;
+export const GET_HOME_DIR_CMD         = "get_home_dir"         as const;

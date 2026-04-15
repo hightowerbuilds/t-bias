@@ -13,11 +13,11 @@ import { PanesRoot } from "./Panes";
 import {
   splitPane,
   closePane,
-  terminalIds,
+  leafIds,
   findAdjacent,
   type PaneMap,
 } from "./pane-tree";
-import type { SplitPane } from "./pane-tree";
+import type { SplitPane, EditorPane } from "./pane-tree";
 import {
   GET_CONFIG_CMD,
   SAVE_SESSION_CMD,
@@ -70,6 +70,35 @@ function makeTab(): TabState {
   };
 }
 
+function makeFileExplorerTab(): TabState {
+  const paneId = newId();
+  return {
+    id: newId(),
+    title: "Files",
+    hasActivity: false,
+    rootId: paneId,
+    activePaneId: paneId,
+    panes: { [paneId]: { type: "file-explorer", id: paneId } },
+    paneTitles: { [paneId]: "Files" },
+    zoomed: false,
+  };
+}
+
+function makeEditorTab(filePath?: string): TabState {
+  const paneId = newId();
+  const title = filePath ? filePath.split("/").pop()! : "Untitled";
+  return {
+    id: newId(),
+    title,
+    hasActivity: false,
+    rootId: paneId,
+    activePaneId: paneId,
+    panes: { [paneId]: { type: "editor", id: paneId, filePath } as EditorPane },
+    paneTitles: { [paneId]: title },
+    zoomed: false,
+  };
+}
+
 const TAB_BAR_H = 30;
 
 // ---------------------------------------------------------------------------
@@ -80,10 +109,12 @@ function tabToSavedTab(t: TabState): SavedTab {
   function serPane(id: number): SavedPane {
     const p = t.panes[id];
     if (p.type === "terminal") return { type: "terminal" };
+    if (p.type === "file-explorer") return { type: "file-explorer" };
+    if (p.type === "editor") return { type: "editor", filePath: (p as EditorPane).filePath };
     const s = p as SplitPane;
     return { type: "split", dir: s.dir, ratio: s.ratio, a: serPane(s.a), b: serPane(s.b) };
   }
-  const leaves = terminalIds(t.panes, t.rootId);
+  const leaves = leafIds(t.panes, t.rootId);
   return {
     layout: serPane(t.rootId),
     activePaneIndex: Math.max(0, leaves.indexOf(t.activePaneId)),
@@ -92,33 +123,43 @@ function tabToSavedTab(t: TabState): SavedTab {
 }
 
 function savedTabToTabState(saved: SavedTab): TabState {
-  const terminalPaneIds: number[] = [];
+  const leafPaneIds: number[] = [];
 
   function buildPane(node: SavedPane): { id: number; panes: PaneMap } {
     if (node.type === "terminal") {
       const id = newId();
-      terminalPaneIds.push(id);
+      leafPaneIds.push(id);
       return { id, panes: { [id]: { type: "terminal", id } } };
     }
+    if (node.type === "file-explorer") {
+      const id = newId();
+      leafPaneIds.push(id);
+      return { id, panes: { [id]: { type: "file-explorer", id } } };
+    }
+    if (node.type === "editor") {
+      const id = newId();
+      leafPaneIds.push(id);
+      return { id, panes: { [id]: { type: "editor", id, filePath: node.filePath } as EditorPane } };
+    }
     const splitId = newId();
-    const { id: aId, panes: aPanes } = buildPane(node.a);
-    const { id: bId, panes: bPanes } = buildPane(node.b);
+    const { id: aId, panes: aPanes } = buildPane(node.a!);
+    const { id: bId, panes: bPanes } = buildPane(node.b!);
     return {
       id: splitId,
       panes: {
         ...aPanes,
         ...bPanes,
-        [splitId]: { type: "split", id: splitId, dir: node.dir, ratio: node.ratio, a: aId, b: bId },
+        [splitId]: { type: "split", id: splitId, dir: node.dir!, ratio: node.ratio!, a: aId, b: bId },
       },
     };
   }
 
   const { id: rootId, panes } = buildPane(saved.layout);
   const activePaneId =
-    terminalPaneIds[Math.min(saved.activePaneIndex, terminalPaneIds.length - 1)] ??
-    terminalPaneIds[0];
+    leafPaneIds[Math.min(saved.activePaneIndex, leafPaneIds.length - 1)] ??
+    leafPaneIds[0];
   const paneTitles: Record<number, string> = {};
-  terminalPaneIds.forEach((id) => { paneTitles[id] = "Shell"; });
+  leafPaneIds.forEach((id) => { paneTitles[id] = "Shell"; });
 
   return {
     id: newId(),
@@ -178,6 +219,15 @@ const App: Component = () => {
     setNamedSessions(names);
   };
 
+  // ── Open file in editor (called from file explorer) ──────────────────────
+
+  const openFileInEditor = (filePath: string) => {
+    const t = makeEditorTab(filePath);
+    setTabs((prev) => [...prev, t]);
+    setActiveTabId(t.id);
+    saveSession();
+  };
+
   // ── Tab operations ────────────────────────────────────────────────────────
 
   const addTab = () => {
@@ -227,7 +277,7 @@ const App: Component = () => {
   const closeActivePane = () => {
     const t = tab();
     if (!t) return;
-    if (terminalIds(t.panes, t.rootId).length <= 1) {
+    if (leafIds(t.panes, t.rootId).length <= 1) {
       removeTab(t.id);
       return;
     }
@@ -327,6 +377,16 @@ const App: Component = () => {
 
     if (e.key === "Enter" && e.shiftKey && !e.altKey) { e.preventDefault(); toggleZoom(); return; }
 
+    // Cmd+Shift+E — file explorer
+    if (key === "e" && e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      const t = makeFileExplorerTab();
+      setTabs((prev) => [...prev, t]);
+      setActiveTabId(t.id);
+      saveSession();
+      return;
+    }
+
     // Cmd+Shift+S — save named session
     if (key === "s" && e.shiftKey && !e.altKey) {
       e.preventDefault();
@@ -366,6 +426,9 @@ const App: Component = () => {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+  let unlistenFileExplorer: (() => void) | undefined;
+  let unlistenCodeEditor: (() => void) | undefined;
+
   onMount(async () => {
     const cfg = (await invoke(GET_CONFIG_CMD)) as AppConfig;
     const saved = (await invoke(LOAD_SESSION_CMD).catch(() => null)) as SessionData | null;
@@ -394,11 +457,28 @@ const App: Component = () => {
 
     // Best-effort save when the page is unloaded.
     window.addEventListener("beforeunload", saveSession);
+
+    // Native menu bar events — "View > File Explorer" and "View > Code Editor"
+    const { listen } = (window as any).__TAURI__.event;
+    unlistenFileExplorer = await listen("open-file-explorer", () => {
+      const t = makeFileExplorerTab();
+      setTabs((prev) => [...prev, t]);
+      setActiveTabId(t.id);
+      saveSession();
+    });
+    unlistenCodeEditor = await listen("open-code-editor", () => {
+      const t = makeEditorTab();
+      setTabs((prev) => [...prev, t]);
+      setActiveTabId(t.id);
+      saveSession();
+    });
   });
 
   onCleanup(() => {
     window.removeEventListener("keydown", handleGlobalKeyDown, { capture: true });
     window.removeEventListener("beforeunload", saveSession);
+    unlistenFileExplorer?.();
+    unlistenCodeEditor?.();
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -509,7 +589,7 @@ const App: Component = () => {
                 }}
               </For>
 
-              {/* New tab */}
+              {/* New terminal tab */}
               <button
                 onClick={addTab}
                 title="New tab (⌘T)"
@@ -520,6 +600,41 @@ const App: Component = () => {
                   "flex-shrink": "0", "align-self": "center",
                 }}
               >+</button>
+
+              {/* File Explorer tab */}
+              <button
+                onClick={() => {
+                  const t = makeFileExplorerTab();
+                  setTabs((prev) => [...prev, t]);
+                  setActiveTabId(t.id);
+                  saveSession();
+                }}
+                title="File Explorer (⌘⇧E)"
+                style={{
+                  background: "none", border: "none", color: "#555",
+                  cursor: "pointer", padding: "0 10px",
+                  "font-size": "13px", "line-height": "1",
+                  "flex-shrink": "0", "align-self": "center",
+                }}
+              >{"\u{1F4C2}"}</button>
+
+              {/* Code Editor tab */}
+              <button
+                onClick={() => {
+                  const t = makeEditorTab();
+                  setTabs((prev) => [...prev, t]);
+                  setActiveTabId(t.id);
+                  saveSession();
+                }}
+                title="Code Editor"
+                style={{
+                  background: "none", border: "none", color: "#555",
+                  cursor: "pointer", padding: "0 10px",
+                  "font-size": "11px", "line-height": "1",
+                  "flex-shrink": "0", "align-self": "center",
+                  "font-family": "Menlo, Monaco, 'Courier New', monospace",
+                }}
+              >&lt;/&gt;</button>
 
               {/* Sessions menu button — far right */}
               <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", "flex-shrink": "0" }}>
@@ -668,6 +783,7 @@ const App: Component = () => {
                       onTitleChange={(paneId, title) => handleTitleChange(t.id, paneId, title)}
                       onActivity={(paneId) => handleActivity(t.id, paneId)}
                       onRatioChange={handleRatioChange}
+                      onOpenFile={openFileInEditor}
                     />
                   </div>
                 )}

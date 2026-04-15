@@ -6,8 +6,10 @@ import {
   onCleanup,
   type Component,
 } from "solid-js";
-import type { PaneMap, SplitPane } from "./pane-tree";
+import type { PaneMap, SplitPane, EditorPane } from "./pane-tree";
 import TerminalView from "./Terminal";
+import EditorView from "./Editor";
+import FileExplorerView from "./FileExplorer";
 import type { AppConfig } from "./ipc/types";
 
 // ---------------------------------------------------------------------------
@@ -30,6 +32,7 @@ export interface PanesRootProps {
   onTitleChange: (paneId: number, title: string) => void;
   onActivity: (paneId: number) => void;
   onRatioChange: (splitId: number, ratio: number) => void;
+  onOpenFile?: (filePath: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,13 +45,34 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
       {/* Zoomed: active pane fills the whole tab */}
       <Show when={props.zoomed}>
         <div style={{ position: "absolute", inset: "0" }}>
-          <TerminalView
-            paneId={props.activePaneId}
-            config={props.config}
-            isActive={true}
-            onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
-            onActivity={() => props.onActivity(props.activePaneId)}
-          />
+          <Switch>
+            <Match when={props.panes[props.activePaneId]?.type === "terminal"}>
+              <TerminalView
+                paneId={props.activePaneId}
+                config={props.config}
+                isActive={true}
+                onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
+                onActivity={() => props.onActivity(props.activePaneId)}
+              />
+            </Match>
+            <Match when={props.panes[props.activePaneId]?.type === "file-explorer"}>
+              <FileExplorerView
+                paneId={props.activePaneId}
+                config={props.config}
+                isActive={true}
+                onOpenFile={props.onOpenFile}
+              />
+            </Match>
+            <Match when={props.panes[props.activePaneId]?.type === "editor"}>
+              <EditorView
+                paneId={props.activePaneId}
+                pane={props.panes[props.activePaneId] as EditorPane}
+                config={props.config}
+                isActive={true}
+                onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
+              />
+            </Match>
+          </Switch>
         </div>
       </Show>
 
@@ -84,18 +108,8 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
           style={{ width: "100%", height: "100%", position: "relative" }}
           onClick={() => props.onActivate(props.paneId)}
         >
-          {/* Blue focus ring on the active pane */}
           <Show when={props.paneId === props.activePaneId}>
-            <div
-              style={{
-                position: "absolute",
-                inset: "0",
-                border: "1px solid #3d6dcc",
-                "pointer-events": "none",
-                "z-index": "20",
-                "box-sizing": "border-box",
-              }}
-            />
+            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
           </Show>
           <TerminalView
             paneId={props.paneId}
@@ -103,6 +117,43 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
             isActive={props.paneId === props.activePaneId}
             onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
             onActivity={() => props.onActivity(props.paneId)}
+          />
+        </div>
+      </Match>
+
+      {/* File Explorer leaf */}
+      <Match when={pane()?.type === "file-explorer"}>
+        <div
+          style={{ width: "100%", height: "100%", position: "relative" }}
+          onClick={() => props.onActivate(props.paneId)}
+        >
+          <Show when={props.paneId === props.activePaneId}>
+            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+          </Show>
+          <FileExplorerView
+            paneId={props.paneId}
+            config={props.config}
+            isActive={props.paneId === props.activePaneId}
+            onOpenFile={props.onOpenFile}
+          />
+        </div>
+      </Match>
+
+      {/* Editor leaf */}
+      <Match when={pane()?.type === "editor"}>
+        <div
+          style={{ width: "100%", height: "100%", position: "relative" }}
+          onClick={() => props.onActivate(props.paneId)}
+        >
+          <Show when={props.paneId === props.activePaneId}>
+            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+          </Show>
+          <EditorView
+            paneId={props.paneId}
+            pane={pane() as EditorPane}
+            config={props.config}
+            isActive={props.paneId === props.activePaneId}
+            onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
           />
         </div>
       </Match>

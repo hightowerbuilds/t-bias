@@ -9,6 +9,17 @@ export interface TerminalPane {
   id: number;
 }
 
+export interface FileExplorerPane {
+  type: "file-explorer";
+  id: number;
+}
+
+export interface EditorPane {
+  type: "editor";
+  id: number;
+  filePath?: string;
+}
+
 export interface SplitPane {
   type: "split";
   id: number;
@@ -20,7 +31,7 @@ export interface SplitPane {
   b: number; // second child pane ID
 }
 
-export type Pane = TerminalPane | SplitPane;
+export type Pane = TerminalPane | FileExplorerPane | EditorPane | SplitPane;
 export type PaneMap = Record<number, Pane>;
 
 // ---------------------------------------------------------------------------
@@ -34,8 +45,20 @@ export function terminalIds(panes: PaneMap, rootId: number): number[] {
     const p = panes[id];
     if (!p) return;
     if (p.type === "terminal") { result.push(id); return; }
-    visit(p.a);
-    visit(p.b);
+    if (p.type === "split") { visit(p.a); visit(p.b); }
+  };
+  visit(rootId);
+  return result;
+}
+
+/** All leaf pane IDs (any non-split type) in layout order. */
+export function leafIds(panes: PaneMap, rootId: number): number[] {
+  const result: number[] = [];
+  const visit = (id: number) => {
+    const p = panes[id];
+    if (!p) return;
+    if (p.type === "split") { visit(p.a); visit(p.b); return; }
+    result.push(id);
   };
   visit(rootId);
   return result;
@@ -45,7 +68,7 @@ export function terminalIds(panes: PaneMap, rootId: number): number[] {
 function findParent(panes: PaneMap, rootId: number, targetId: number): SplitPane | null {
   const visit = (id: number): SplitPane | null => {
     const p = panes[id];
-    if (!p || p.type === "terminal") return null;
+    if (!p || p.type !== "split") return null;
     if (p.a === targetId || p.b === targetId) return p;
     return visit(p.a) ?? visit(p.b);
   };
@@ -129,7 +152,7 @@ export function findAdjacent(
   activeId: number,
   dir: "left" | "right" | "up" | "down",
 ): number | null {
-  const ids = terminalIds(panes, rootId);
+  const ids = leafIds(panes, rootId);
   const idx = ids.indexOf(activeId);
   if (idx === -1) return null;
   const step = dir === "right" || dir === "down" ? 1 : -1;

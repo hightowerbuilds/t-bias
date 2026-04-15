@@ -1,4 +1,4 @@
-# Tobias
+# t-bias
 
 A terminal emulator built from scratch. Canvas-rendered, zero third-party terminal dependencies, packaged as a native desktop app via Tauri.
 

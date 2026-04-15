@@ -66,6 +66,23 @@ impl Default for ThemeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    /// "always" | "never" | "ask"
+    #[serde(default = "default_restore_mode")]
+    pub restore: String,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self { restore: default_restore_mode() }
+    }
+}
+
+fn default_restore_mode() -> String {
+    "ask".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub font: FontConfig,
@@ -79,6 +96,8 @@ pub struct Config {
     pub padding: u32,
     #[serde(default)]
     pub theme: ThemeConfig,
+    #[serde(default)]
+    pub session: SessionConfig,
 }
 
 impl Default for Config {
@@ -90,6 +109,7 @@ impl Default for Config {
             shell: default_shell(),
             padding: default_padding(),
             theme: ThemeConfig::default(),
+            session: SessionConfig::default(),
         }
     }
 }

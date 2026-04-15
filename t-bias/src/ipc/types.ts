@@ -65,6 +65,10 @@ export interface ConfigCursor {
   blink: boolean;
 }
 
+export interface ConfigSession {
+  restore: "always" | "never" | "ask";
+}
+
 export interface AppConfig {
   font: ConfigFont;
   scrollback_limit: number;
@@ -72,12 +76,39 @@ export interface AppConfig {
   shell: string;
   padding: number;
   theme: ConfigTheme;
+  session: ConfigSession;
+}
+
+// ========================== Session (layout persistence) ==========================
+
+/** Recursive pane layout — no IDs, freshly assigned on restore. */
+export type SavedPane =
+  | { type: "terminal" }
+  | { type: "split"; dir: "h" | "v"; ratio: number; a: SavedPane; b: SavedPane };
+
+export interface SavedTab {
+  layout: SavedPane;
+  /** 0-based index into DFS-ordered terminal list for the active pane. */
+  activePaneIndex: number;
+  title: string;
+}
+
+export interface SessionData {
+  version: 1;
+  activeTabIndex: number;
+  tabs: SavedTab[];
 }
 
 // ========================== Command names (string constants) ==========================
 
-export const SPAWN_SHELL_CMD  = "spawn_shell"  as const;
-export const WRITE_TO_PTY_CMD = "write_to_pty" as const;
-export const RESIZE_PTY_CMD   = "resize_pty"   as const;
-export const CLOSE_PANE_CMD   = "close_pane"   as const;
-export const GET_CONFIG_CMD   = "get_config"   as const;
+export const SPAWN_SHELL_CMD          = "spawn_shell"         as const;
+export const WRITE_TO_PTY_CMD         = "write_to_pty"        as const;
+export const RESIZE_PTY_CMD           = "resize_pty"          as const;
+export const CLOSE_PANE_CMD           = "close_pane"          as const;
+export const GET_CONFIG_CMD           = "get_config"          as const;
+export const SAVE_SESSION_CMD         = "save_session"        as const;
+export const LOAD_SESSION_CMD         = "load_session"        as const;
+export const SAVE_NAMED_SESSION_CMD   = "save_named_session"  as const;
+export const LOAD_NAMED_SESSION_CMD   = "load_named_session"  as const;
+export const LIST_NAMED_SESSIONS_CMD  = "list_named_sessions" as const;
+export const DELETE_NAMED_SESSION_CMD = "delete_named_session" as const;

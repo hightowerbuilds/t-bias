@@ -1,5 +1,6 @@
 mod config;
 mod pty;
+mod session;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,6 +13,12 @@ pub fn run() {
             pty::resize_pty,
             pty::close_pane,
             config::get_config,
+            session::save_session,
+            session::load_session,
+            session::save_named_session,
+            session::load_named_session,
+            session::list_named_sessions,
+            session::delete_named_session,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

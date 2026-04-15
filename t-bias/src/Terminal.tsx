@@ -1,24 +1,33 @@
-import { onMount, onCleanup, type Component } from "solid-js";
+import { onMount, onCleanup, createSignal, createEffect, type Component } from "solid-js";
 import { TerminalHost } from "./terminal/TerminalHost";
 import {
-  SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD,
-  GET_CONFIG_CMD,
-  PTY_OUTPUT_EVENT, PTY_EXIT_EVENT,
+  SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD, CLOSE_TAB_CMD,
   type AppConfig,
 } from "./ipc/types";
 
 const { invoke } = (window as any).__TAURI__.core;
 const { listen } = (window as any).__TAURI__.event;
 
-const TerminalView: Component = () => {
-  let containerRef!: HTMLDivElement;
+export interface TerminalViewProps {
+  tabId: number;
+  config: AppConfig;
+  /** Whether this tab is currently visible and active. */
+  isActive: boolean;
+  /** Called when the shell emits an OSC title change. */
+  onTitleChange?: (title: string) => void;
+  /** Called when the terminal receives output while not active (for activity dot). */
+  onActivity?: () => void;
+}
+
+const TerminalView: Component<TerminalViewProps> = (props) => {
   let textCanvasRef!: HTMLCanvasElement;
+  let terminal: TerminalHost | undefined;
+  const [terminalReady, setTerminalReady] = createSignal(false);
 
   onMount(async () => {
-    // Fetch config from Rust backend (falls back to defaults if no file)
-    const config: AppConfig = await invoke(GET_CONFIG_CMD);
+    const config = props.config;
 
-    const terminal = new TerminalHost(textCanvasRef, {
+    terminal = new TerminalHost(textCanvasRef, {
       fontSize: config.font.size,
       fontFamily: config.font.family,
       scrollbackLimit: config.scrollback_limit,
@@ -34,48 +43,65 @@ const TerminalView: Component = () => {
       },
     });
 
+    // Signal that the terminal object exists so the focus effect can fire.
+    setTerminalReady(true);
+
     const { cols, rows } = terminal.gridSize;
 
     terminal.onData = (data) => {
-      invoke(WRITE_TO_PTY_CMD, { data });
+      invoke(WRITE_TO_PTY_CMD, { tab_id: props.tabId, data });
     };
 
     terminal.core.onClipboard = (text) => {
       navigator.clipboard.writeText(text);
     };
 
-    const unlistenOutput = await listen(PTY_OUTPUT_EVENT, (event: any) => {
-      terminal.write(event.payload as string);
-    });
-
-    const unlistenExit = await listen(PTY_EXIT_EVENT, () => {
-      terminal.write("\r\n[Process exited]\r\n");
-    });
-
-    // Pass shell override to spawn_shell if configured
-    const shell = config.shell || undefined;
-    await invoke(SPAWN_SHELL_CMD, { cols, rows, shell });
-
-    terminal.onResize = (cols, rows) => {
-      invoke(RESIZE_PTY_CMD, { cols, rows });
+    terminal.onTitleChange = (title) => {
+      props.onTitleChange?.(title);
     };
 
-    const onWindowResize = () => terminal.fit();
-    window.addEventListener("resize", onWindowResize);
+    const unlistenOutput = await listen(
+      `pty-output-${props.tabId}`,
+      (event: any) => {
+        terminal!.write(event.payload as string);
+        if (!props.isActive) {
+          props.onActivity?.();
+        }
+      },
+    );
 
-    terminal.focus();
+    const unlistenExit = await listen(`pty-exit-${props.tabId}`, () => {
+      terminal!.write("\r\n[Process exited]\r\n");
+    });
+
+    const shell = config.shell || undefined;
+    await invoke(SPAWN_SHELL_CMD, { tab_id: props.tabId, cols, rows, shell });
+
+    terminal.onResize = (cols, rows) => {
+      invoke(RESIZE_PTY_CMD, { tab_id: props.tabId, cols, rows });
+    };
+
+    const onWindowResize = () => terminal?.fit();
+    window.addEventListener("resize", onWindowResize);
 
     onCleanup(() => {
       window.removeEventListener("resize", onWindowResize);
       unlistenOutput();
       unlistenExit();
-      terminal.dispose();
+      terminal?.dispose();
+      invoke(CLOSE_TAB_CMD, { tab_id: props.tabId }).catch(() => {});
     });
+  });
+
+  // Focus the terminal whenever this tab becomes active.
+  createEffect(() => {
+    if (props.isActive && terminalReady()) {
+      terminal!.focus();
+    }
   });
 
   return (
     <div
-      ref={containerRef}
       style={{
         position: "relative",
         width: "100%",

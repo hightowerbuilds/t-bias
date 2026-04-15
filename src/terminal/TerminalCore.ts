@@ -21,6 +21,7 @@ export class TerminalCore {
   // Callbacks
   onResponse?: (data: string) => void;
   onTitleChange?: (title: string) => void;
+  onClipboard?: (text: string) => void;
 
   constructor(cols: number, rows: number, scrollbackLimit = 5000) {
     this.cols = cols;
@@ -28,6 +29,7 @@ export class TerminalCore {
     this.virtualCanvas = new VirtualCanvas(cols, rows, scrollbackLimit);
     this.screen = new Screen(cols, rows, this.virtualCanvas);
     this.screen.onResponse = (data) => this.onResponse?.(data);
+    this.screen.onClipboard = (payload) => this.handleOsc52(payload);
     this.parser = new Parser(this.screen);
   }
 
@@ -52,6 +54,30 @@ export class TerminalCore {
     this.rows = rows;
     this.virtualCanvas.resize(cols, rows);
     this.screen.resize(cols, rows);
+  }
+
+  // =========================================================================
+  // OSC 52 clipboard
+  // =========================================================================
+
+  /** Handle OSC 52 clipboard sequence. Payload format: "Pc;Pd" */
+  private handleOsc52(payload: string): void {
+    const semi = payload.indexOf(";");
+    if (semi < 0) return;
+    const pd = payload.substring(semi + 1);
+
+    if (pd === "?") {
+      // Query — not supported (would need async clipboard read)
+      return;
+    }
+
+    // Pd is base64-encoded text
+    try {
+      const text = atob(pd);
+      this.onClipboard?.(text);
+    } catch {
+      // Invalid base64 — ignore
+    }
   }
 
   // =========================================================================

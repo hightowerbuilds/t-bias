@@ -48,6 +48,12 @@ const enum S {
 // Value chosen to never collide with real params (which are 0–65535 range).
 export const SUB_PARAM_MARKER = -1;
 
+// Grapheme segmenter — used to group combining marks, ZWJ sequences, etc.
+// Falls back to codepoint-at-a-time if Intl.Segmenter is not available.
+const segmenter = typeof Intl !== "undefined" && Intl.Segmenter
+  ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+  : null;
+
 export class Parser {
   private state: S = S.Ground;
   private params: number[] = [];
@@ -59,11 +65,34 @@ export class Parser {
   private dcsParams: number[] = [];
   private apcData = "";
 
+  // Ground-state print buffer for grapheme clustering
+  private printBuf = "";
+
   constructor(private handler: ParserHandler) {}
 
   feed(data: string) {
     for (const ch of data) {                // iterates code-points, not code-units
       this.next(ch, ch.codePointAt(0)!);
+    }
+    // Flush any remaining print buffer at end of feed
+    this.flushPrintBuffer();
+  }
+
+  /** Flush buffered printable characters, segmented into grapheme clusters. */
+  private flushPrintBuffer() {
+    if (this.printBuf.length === 0) return;
+    const buf = this.printBuf;
+    this.printBuf = "";
+
+    if (segmenter) {
+      for (const { segment } of segmenter.segment(buf)) {
+        this.handler.print(segment);
+      }
+    } else {
+      // Fallback: iterate codepoints (no grapheme clustering)
+      for (const ch of buf) {
+        this.handler.print(ch);
+      }
     }
   }
 
@@ -106,9 +135,11 @@ export class Parser {
       // ------- GROUND -------
       case S.Ground:
         if (code < 0x20 || code === 0x7f) {
+          this.flushPrintBuffer();
           this.handler.execute(code);
         } else {
-          this.handler.print(ch);
+          // Buffer printable characters for grapheme cluster segmentation
+          this.printBuf += ch;
         }
         break;
 
@@ -354,6 +385,7 @@ export class Parser {
 
   // -----------------------------------------------------------------------
   private enterEscape() {
+    this.flushPrintBuffer();
     this.intermediates = "";
     this.state = S.Escape;
   }

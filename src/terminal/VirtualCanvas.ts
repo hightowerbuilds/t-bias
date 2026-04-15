@@ -62,6 +62,10 @@ export class VirtualCanvas {
   // Indexed by PHYSICAL row, not logical row.
   private rowGraphemes: (Map<number, string> | null)[];
 
+  // Soft-wrap tracking: 1 = this row is a continuation of the previous row
+  // Indexed by physical row. Used for reflow on resize.
+  private softWrapped: Uint8Array;
+
   // Dirty tracking (I9: sub-row dirty ranges alongside bitmap)
   dirtyBitmap: Uint8Array;
   dirtyColStart: Uint16Array;
@@ -108,6 +112,7 @@ export class VirtualCanvas {
 
     // Per-row graphemes indexed by physical row
     this.rowGraphemes = new Array(this.physRows).fill(null);
+    this.softWrapped = new Uint8Array(this.physRows);
 
     // Allocate scrollback ring buffer (4.2: Uint16Array for attrs, no ulColor)
     this.sbCols = cols;
@@ -239,6 +244,21 @@ export class VirtualCanvas {
   }
 
   // =========================================================================
+  // Soft-wrap tracking
+  // =========================================================================
+
+  /** Mark a logical row as a soft-wrapped continuation of the previous row. */
+  setSoftWrapped(row: number, wrapped: boolean): void {
+    const physRow = this.activeRowMap[row];
+    this.softWrapped[physRow] = wrapped ? 1 : 0;
+  }
+
+  /** Check if a logical row is soft-wrapped. */
+  isSoftWrapped(row: number): boolean {
+    return this.softWrapped[this.activeRowMap[row]] === 1;
+  }
+
+  // =========================================================================
   // Grapheme helpers (per-row storage, keyed by column)
   // Indexed by PHYSICAL row (rowGraphemes[physRow])
   // =========================================================================
@@ -320,6 +340,7 @@ export class VirtualCanvas {
     page.attrs.fill(0, offset, offset + this.cols);
     page.ulColor.fill(DEFAULT_COLOR, offset, offset + this.cols);
     this.clearPhysRowGraphemes(this.activeRowMap[row]);
+    this.softWrapped[this.activeRowMap[row]] = 0;
     this.markDirty(row);
   }
 
@@ -504,8 +525,9 @@ export class VirtualCanvas {
     // Reset both rowMaps to identity
     this.resetRowMap(this.mainRowMap);
     this.resetRowMap(this.altRowMap);
-    // Clear all graphemes (physRows entries)
+    // Clear all graphemes and soft-wrap flags (physRows entries)
     this.rowGraphemes.fill(null);
+    this.softWrapped.fill(0);
     this.sbHead = 0;
     this.sbCount = 0;
     this.isAlt = false;

@@ -187,6 +187,8 @@ export class Screen implements ParserHandler {
       this.wrapPending = false;
       this.cursorX = 0;
       this.indexDown();
+      // Mark the new row as a soft-wrapped continuation
+      this.vc.setSoftWrapped(this.cursorY, true);
     }
 
     // Wide char won't fit at last col → wrap first
@@ -195,6 +197,7 @@ export class Screen implements ParserHandler {
         this.vc.setCell(this.cursorY, this.cursorX, "", DEFAULT_COLOR, this.curBg, 0, DEFAULT_COLOR);
         this.cursorX = 0;
         this.indexDown();
+        this.vc.setSoftWrapped(this.cursorY, true);
       } else {
         return;
       }
@@ -275,12 +278,41 @@ export class Screen implements ParserHandler {
       // Private modes
       if (final === "h") { for (const p of params) this.setPrivateMode(p, true); return; }
       if (final === "l") { for (const p of params) this.setPrivateMode(p, false); return; }
+      // DECRQM — request private mode: CSI ? Ps $ p
+      // Handled below with "$" intermediate
+    }
+
+    // DECRQM — CSI ? Ps $ p (private) or CSI Ps $ p (standard)
+    if (intermediates === "?$" && final === "p") {
+      // Reply: CSI ? Ps ; Pm $ y — Pm: 1=set, 2=reset, 0=unknown
+      const pm = this.queryPrivateMode(p0);
+      this.onResponse?.(`\x1b[?${p0};${pm}$y`);
+      return;
+    }
+    if (intermediates === "$" && final === "p") {
+      // Standard mode query — reply with "unknown" for most
+      const pm = p0 === 4 ? (this.insertMode ? 1 : 2) : 0;
+      this.onResponse?.(`\x1b[${p0};${pm}$y`);
+      return;
     }
 
     if (intermediates === ">") {
       if (final === "c") {
         // DA2 response
         this.onResponse?.("\x1b[>0;0;0c");
+        return;
+      }
+      if (final === "q") {
+        // XTVERSION — reply with DCS > | name ST
+        this.onResponse?.("\x1bP>|t-bias 0.1.0\x1b\\");
+        return;
+      }
+    }
+
+    if (intermediates === "=") {
+      if (final === "c") {
+        // DA3 — tertiary device attributes: DCS ! | <hex id> ST
+        this.onResponse?.("\x1bP!|00000000\x1b\\");
         return;
       }
     }
@@ -368,10 +400,20 @@ export class Screen implements ParserHandler {
     }
   }
 
+  // Callbacks for host-level features
+  onCwd?: (uri: string) => void;
+  onShellIntegration?: (mark: string, param?: string) => void;
+
   // ------- oscDispatch -------
   oscDispatch(data: string) {
     const semi = data.indexOf(";");
-    if (semi < 0) return;
+    if (semi < 0) {
+      // Some OSC codes have no payload (e.g., OSC 104, OSC 112)
+      const code = parseInt(data, 10);
+      if (code === 104) return; // Reset all palette colors — no-op (we use theme defaults)
+      if (code === 112) return; // Reset cursor color — no-op (we use theme default)
+      return;
+    }
     const code = parseInt(data.substring(0, semi), 10);
     const payload = data.substring(semi + 1);
 
@@ -383,12 +425,84 @@ export class Screen implements ParserHandler {
         // Icon name — treat as title
         this.title = payload;
         break;
+      case 7:
+        // CWD: OSC 7 ; file://hostname/path ST
+        this.onCwd?.(payload);
+        break;
+      case 10:
+        // Query/set foreground color
+        if (payload === "?") {
+          // Report current foreground color in rgb:RR/GG/BB format
+          // Use theme default (#d4d4d4 → rgb:d4/d4/d4)
+          this.onResponse?.("\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\");
+        }
+        // Set foreground — not implemented (would need theme mutation)
+        break;
+      case 11:
+        // Query/set background color
+        if (payload === "?") {
+          // Report current background color (#1e1e1e → rgb:1e/1e/1e)
+          this.onResponse?.("\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\");
+        }
+        break;
+      case 12:
+        // Query/set cursor color
+        if (payload === "?") {
+          this.onResponse?.("\x1b]12;rgb:d4d4/d4d4/d4d4\x1b\\");
+        }
+        break;
       case 52:
         // Clipboard: OSC 52 ; Pc ; Pd BEL
-        // Pd is base64-encoded text. We dispatch it for the host to handle.
         this.onClipboard?.(payload);
         break;
+      case 104:
+        // Reset color N — no-op (we always use theme defaults)
+        break;
+      case 112:
+        // Reset cursor color — no-op
+        break;
+      case 133:
+        // Shell integration: OSC 133 ; <mark> [; <param>] ST
+        // Marks: A=prompt start, B=command start, C=output start, D=command done
+        this.onShellIntegration?.(payload.charAt(0), payload.length > 1 ? payload.substring(2) : undefined);
+        break;
       // OSC 8 hyperlinks — not yet supported
+    }
+  }
+
+  // ------- dcsDispatch -------
+  dcsDispatch(intermediates: string, params: number[], data: string) {
+    // DECRQSS — DCS $ q <request> ST → reply with DCS 1 $ r <value> ST
+    if (intermediates === "$" || data.startsWith("$q")) {
+      const req = data.startsWith("$q") ? data.substring(2) : data;
+      if (req === "r") {
+        // DECSTBM — report scroll region
+        this.onResponse?.(`\x1bP1$r${this.scrollTop + 1};${this.scrollBottom + 1}r\x1b\\`);
+      } else if (req === "m") {
+        // SGR — report current SGR state (simplified: just report reset)
+        this.onResponse?.("\x1bP1$r0m\x1b\\");
+      } else if (req === '"p') {
+        // DECSCL — report conformance level
+        this.onResponse?.('\x1bP1$r62"p\x1b\\');
+      } else if (req === " q") {
+        // DECSCUSR — report cursor style
+        const style = this.cursorShape === "block" ? 1 : this.cursorShape === "underline" ? 3 : 5;
+        this.onResponse?.(`\x1bP1$r${style} q\x1b\\`);
+      } else {
+        // Unknown request — reply with invalid
+        this.onResponse?.("\x1bP0$r\x1b\\");
+      }
+      return;
+    }
+
+    // XTGETTCAP — DCS + q <hex-encoded-cap-name> ST
+    // tmux probes for capabilities like RGB, Smulx, etc.
+    if (data.startsWith("+q")) {
+      const hexCap = data.substring(2);
+      // Respond with "not found" for all — DCS 0 + r ST
+      // This tells tmux to fall back to terminfo, which is correct behavior
+      this.onResponse?.(`\x1bP0+r${hexCap}\x1b\\`);
+      return;
     }
   }
 
@@ -686,6 +800,28 @@ export class Screen implements ParserHandler {
   // ========================================================================
   // Private modes (DECSET / DECRST)
   // ========================================================================
+
+  /** Query private mode state for DECRQM. Returns 1=set, 2=reset, 0=unknown. */
+  private queryPrivateMode(mode: number): number {
+    switch (mode) {
+      case 1: return this.applicationCursor ? 1 : 2;
+      case 6: return this.originMode ? 1 : 2;
+      case 7: return this.autoWrap ? 1 : 2;
+      case 12: return 2; // cursor blink — always report as reset
+      case 25: return this.cursorVisible ? 1 : 2;
+      case 47: case 1047: return this.isAltScreen ? 1 : 2;
+      case 1000: return this.mouseTrack ? 1 : 2;
+      case 1002: return this.mouseDrag ? 1 : 2;
+      case 1003: return this.mouseAll ? 1 : 2;
+      case 1004: return this.focusEvents ? 1 : 2;
+      case 1006: return this.mouseSgr ? 1 : 2;
+      case 1049: return this.isAltScreen ? 1 : 2;
+      case 2004: return this.bracketedPaste ? 1 : 2;
+      case 2026: return 2; // synchronized output — accepted but always "reset"
+      default: return 0; // unknown
+    }
+  }
+
   private setPrivateMode(mode: number, enable: boolean) {
     switch (mode) {
       case 1:                                               // DECCKM
@@ -728,6 +864,10 @@ export class Screen implements ParserHandler {
       case 1047:                                            // Alt screen (no save)
         if (enable) this.switchToAlt();
         else this.switchToMain();
+        break;
+      case 1005:                                            // UTF-8 mouse encoding (accepted, use SGR instead)
+        break;
+      case 1015:                                            // URXVT mouse encoding (accepted, use SGR instead)
         break;
       case 2026:                                            // Synchronized output (no-op, accepted)
         break;
@@ -798,6 +938,16 @@ export class Screen implements ParserHandler {
   // ========================================================================
   private windowOps(params: number[]) {
     switch (params[0]) {
+      case 11: // Report window state — always report as non-iconified
+        this.onResponse?.("\x1b[1t");
+        break;
+      case 14: // Report window size in pixels — approximate from grid
+        // Actual pixel size depends on renderer; report best estimate
+        this.onResponse?.(`\x1b[4;${this.rows * 16};${this.cols * 8}t`);
+        break;
+      case 18: // Report terminal size in characters
+        this.onResponse?.(`\x1b[8;${this.rows};${this.cols}t`);
+        break;
       case 22: // Push title
         this.titleStack.push(this.title);
         break;

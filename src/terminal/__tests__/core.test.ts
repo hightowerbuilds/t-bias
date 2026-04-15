@@ -285,6 +285,38 @@ describe("Character sets", () => {
 });
 
 // =========================================================================
+// Grapheme clusters
+// =========================================================================
+describe("Grapheme clusters", () => {
+  it("single emoji occupies 2 cells", () => {
+    const c = term(20, 5);
+    c.write("🔥");
+    const cell = cellAt(c, 0, 0);
+    expect(cell.char).toBe("🔥");
+    // Cursor should advance by 2 (wide char)
+    expect(c.cursor.x).toBe(2);
+    // Second cell should be empty (wide char placeholder)
+    expect(cellAt(c, 0, 1).char).toBe("");
+  });
+
+  it("ASCII text is not affected by grapheme segmentation", () => {
+    const c = term(20, 5);
+    c.write("Hello");
+    expect(textAt(c, 0, 0, 4)).toBe("Hello");
+    expect(c.cursor.x).toBe(5);
+  });
+
+  it("emoji followed by ASCII renders correctly", () => {
+    const c = term(20, 5);
+    c.write("🎉AB");
+    expect(cellAt(c, 0, 0).char).toBe("🎉");
+    expect(cellAt(c, 0, 2).char).toBe("A");
+    expect(cellAt(c, 0, 3).char).toBe("B");
+    expect(c.cursor.x).toBe(4);
+  });
+});
+
+// =========================================================================
 // Alt screen
 // =========================================================================
 describe("Alt screen", () => {
@@ -350,6 +382,43 @@ describe("Device responses", () => {
     c.onResponse = (data) => { response = data; };
     c.write("\x1b[5;10H\x1b[6n");
     expect(response).toBe("\x1b[5;10R");
+  });
+
+  it("DA2 sends response", () => {
+    const c = term();
+    let response = "";
+    c.onResponse = (data) => { response = data; };
+    c.write("\x1b[>c");
+    expect(response).toBe("\x1b[>0;0;0c");
+  });
+
+  it("XTVERSION sends DCS response", () => {
+    const c = term();
+    let response = "";
+    c.onResponse = (data) => { response = data; };
+    c.write("\x1b[>0q");
+    expect(response).toContain("t-bias");
+  });
+
+  it("DECRQM reports private mode state", () => {
+    const c = term();
+    let response = "";
+    c.onResponse = (data) => { response = data; };
+    // Query bracketed paste mode (2004) — should be reset (2)
+    c.write("\x1b[?2004$p");
+    expect(response).toBe("\x1b[?2004;2$y");
+    // Enable it, then query again — should be set (1)
+    c.write("\x1b[?2004h");
+    c.write("\x1b[?2004$p");
+    expect(response).toBe("\x1b[?2004;1$y");
+  });
+
+  it("window ops 18t reports terminal size", () => {
+    const c = term(80, 24);
+    let response = "";
+    c.onResponse = (data) => { response = data; };
+    c.write("\x1b[18t");
+    expect(response).toBe("\x1b[8;24;80t");
   });
 });
 

@@ -151,10 +151,15 @@ export interface TerminalOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Wide character detection (Unicode East Asian Width)
+// Wide character detection (Unicode East Asian Width + Emoji)
 // ---------------------------------------------------------------------------
 export function isWideChar(char: string): boolean {
+  // Multi-codepoint grapheme clusters (ZWJ sequences, flag sequences,
+  // skin tone modifiers) are always wide (2 cells)
   const code = char.codePointAt(0)!;
+  const cpLen = code > 0xFFFF ? 2 : 1;
+  if (char.length > cpLen) return true;
+
   if (code < 0x1100) return false;
   // Hangul Jamo
   if (code >= 0x1100 && code <= 0x115f) return true;
@@ -174,8 +179,14 @@ export function isWideChar(char: string): boolean {
   if (code >= 0xfe10 && code <= 0xfe6f) return true;
   if (code >= 0xff01 && code <= 0xff60) return true;
   if (code >= 0xffe0 && code <= 0xffe6) return true;
+  // Emoji presentation sequences (single codepoints that render wide)
+  if (code >= 0x1f1e0 && code <= 0x1f1ff) return true;  // Regional indicator symbols
+  if (code >= 0x1f300 && code <= 0x1f9ff) return true;   // Misc symbols, emoticons, etc.
+  if (code >= 0x1fa00 && code <= 0x1fa6f) return true;   // Chess, extended-A
+  if (code >= 0x1fa70 && code <= 0x1faff) return true;   // Extended-B
+  if (code >= 0x2600 && code <= 0x27bf) return true;     // Misc symbols, dingbats
+  if (code >= 0x2300 && code <= 0x23ff) return true;     // Misc technical (⏎, ⌘, etc.)
   // Supplementary CJK
-  if (code >= 0x1f300 && code <= 0x1f9ff) return true;
   if (code >= 0x20000 && code <= 0x2fa1f) return true;
   return false;
 }

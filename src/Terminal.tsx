@@ -25,6 +25,10 @@ const TerminalView: Component = () => {
       invoke(WRITE_TO_PTY_CMD, { data });
     };
 
+    terminal.core.onClipboard = (text) => {
+      navigator.clipboard.writeText(text);
+    };
+
     const unlistenOutput = await listen(PTY_OUTPUT_EVENT, (event: any) => {
       terminal.write(event.payload as string);
     });

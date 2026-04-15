@@ -148,6 +148,9 @@ export interface TerminalOptions {
   fontFamily?: string;
   theme?: Partial<Theme>;
   scrollbackLimit?: number;
+  padding?: number;
+  cursorStyle?: "block" | "underline" | "bar";
+  cursorBlink?: boolean;
 }
 
 // ---------------------------------------------------------------------------

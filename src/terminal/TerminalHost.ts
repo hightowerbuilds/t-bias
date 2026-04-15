@@ -36,6 +36,13 @@ export class TerminalHost {
   private static readonly MIN_FONT_SIZE = 8;
   private static readonly MAX_FONT_SIZE = 32;
 
+  // Padding (CSS pixels around the terminal grid)
+  private padding: number;
+
+  // Cursor config
+  private cursorStyle: "block" | "underline" | "bar";
+  private cursorBlink: boolean;
+
   // Cursor blink
   private cursorOn = true;
   private blinkTimer: number | null = null;
@@ -82,20 +89,35 @@ export class TerminalHost {
       options.fontFamily ?? "Menlo, Monaco, 'Courier New', monospace";
     this.theme = { ...DEFAULT_THEME, ...options.theme };
     this.dpr = window.devicePixelRatio || 1;
+    this.padding = options.padding ?? 0;
+    this.cursorStyle = options.cursorStyle ?? "block";
+    this.cursorBlink = options.cursorBlink ?? true;
 
     this.fontSize = fontSize;
     this.defaultFontSize = fontSize;
     this.renderer = new CanvasRenderer(textCanvas, { fontSize, fontFamily, theme: this.theme });
 
+    // Apply padding to the canvas container
+    if (this.padding > 0) {
+      const container = textCanvas.parentElement;
+      if (container) {
+        container.style.padding = `${this.padding}px`;
+        container.style.boxSizing = "border-box";
+      }
+    }
+
     const rect = textCanvas.parentElement?.getBoundingClientRect() ?? {
       width: 960,
       height: 640,
     };
-    const grid = this.renderer.gridSize(rect.width, rect.height);
+    const availWidth = rect.width - this.padding * 2;
+    const availHeight = rect.height - this.padding * 2;
+    const grid = this.renderer.gridSize(availWidth, availHeight);
     this.cols = grid.cols;
     this.rows = grid.rows;
 
     this.core = new TerminalCore(this.cols, this.rows, options.scrollbackLimit ?? 5000);
+    this.core.cursorShape = this.cursorStyle;
     this.core.onResponse = (data) => this.onData?.(data);
     this.core.onTitleChange = (title) => this.onTitleChange?.(title);
 
@@ -124,7 +146,9 @@ export class TerminalHost {
     inputTarget.addEventListener("focus", this.handleFocus);
     inputTarget.addEventListener("blur", this.handleBlur);
 
-    this.startBlink();
+    if (this.cursorBlink) {
+      this.startBlink();
+    }
     this.startThroughputTimer();
     this.scheduleTextDraw();
     this.scheduleOverlayDraw();
@@ -213,7 +237,9 @@ export class TerminalHost {
     const rect = this.textCanvas.parentElement?.getBoundingClientRect();
     if (!rect) return { cols: this.cols, rows: this.rows };
 
-    const grid = this.renderer.gridSize(rect.width, rect.height);
+    const availWidth = rect.width - this.padding * 2;
+    const availHeight = rect.height - this.padding * 2;
+    const grid = this.renderer.gridSize(availWidth, availHeight);
     if (grid.cols !== this.cols || grid.rows !== this.rows) {
       this.cols = grid.cols;
       this.rows = grid.rows;

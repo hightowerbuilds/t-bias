@@ -2,7 +2,9 @@ import { onMount, onCleanup, type Component } from "solid-js";
 import { TerminalHost } from "./terminal/TerminalHost";
 import {
   SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD,
+  GET_CONFIG_CMD,
   PTY_OUTPUT_EVENT, PTY_EXIT_EVENT,
+  type AppConfig,
 } from "./ipc/types";
 
 const { invoke } = (window as any).__TAURI__.core;
@@ -13,10 +15,23 @@ const TerminalView: Component = () => {
   let textCanvasRef!: HTMLCanvasElement;
 
   onMount(async () => {
+    // Fetch config from Rust backend (falls back to defaults if no file)
+    const config: AppConfig = await invoke(GET_CONFIG_CMD);
+
     const terminal = new TerminalHost(textCanvasRef, {
-      fontSize: 14,
-      fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-      scrollbackLimit: 5000,
+      fontSize: config.font.size,
+      fontFamily: config.font.family,
+      scrollbackLimit: config.scrollback_limit,
+      padding: config.padding,
+      cursorStyle: config.cursor.style,
+      cursorBlink: config.cursor.blink,
+      theme: {
+        background: config.theme.background,
+        foreground: config.theme.foreground,
+        cursor: config.theme.cursor,
+        selectionBg: config.theme.selection_bg,
+        ansi: config.theme.ansi,
+      },
     });
 
     const { cols, rows } = terminal.gridSize;
@@ -37,7 +52,9 @@ const TerminalView: Component = () => {
       terminal.write("\r\n[Process exited]\r\n");
     });
 
-    await invoke(SPAWN_SHELL_CMD, { cols, rows });
+    // Pass shell override to spawn_shell if configured
+    const shell = config.shell || undefined;
+    await invoke(SPAWN_SHELL_CMD, { cols, rows, shell });
 
     terminal.onResize = (cols, rows) => {
       invoke(RESIZE_PTY_CMD, { cols, rows });

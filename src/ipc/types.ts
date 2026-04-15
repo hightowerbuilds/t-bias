@@ -40,8 +40,39 @@ export interface PtyExitEvent {
 export const PTY_OUTPUT_EVENT = "pty-output" as const;
 export const PTY_EXIT_EVENT = "pty-exit" as const;
 
+// ========================== Config (backend → frontend) ==========================
+
+/** get_config: Returns the full configuration from disk (or defaults). */
+export interface ConfigTheme {
+  background: string;
+  foreground: string;
+  cursor: string;
+  selection_bg: string;
+  ansi: string[];
+}
+
+export interface ConfigFont {
+  family: string;
+  size: number;
+}
+
+export interface ConfigCursor {
+  style: "block" | "underline" | "bar";
+  blink: boolean;
+}
+
+export interface AppConfig {
+  font: ConfigFont;
+  scrollback_limit: number;
+  cursor: ConfigCursor;
+  shell: string;
+  padding: number;
+  theme: ConfigTheme;
+}
+
 // ========================== Command names (string constants) ==========================
 
 export const SPAWN_SHELL_CMD = "spawn_shell" as const;
 export const WRITE_TO_PTY_CMD = "write_to_pty" as const;
 export const RESIZE_PTY_CMD = "resize_pty" as const;
+export const GET_CONFIG_CMD = "get_config" as const;

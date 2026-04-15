@@ -175,4 +175,9 @@ export class TerminalCore {
       shape: this.screen.cursorShape,
     };
   }
+
+  /** Set the default cursor shape (before any escape-sequence overrides). */
+  set cursorShape(shape: "block" | "underline" | "bar") {
+    this.screen.cursorShape = shape;
+  }
 }

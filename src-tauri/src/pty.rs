@@ -26,6 +26,7 @@ pub fn spawn_shell(
     state: tauri::State<'_, PtyState>,
     cols: u16,
     rows: u16,
+    shell: Option<String>,
 ) -> Result<(), String> {
     let pty_system = NativePtySystem::default();
 
@@ -38,7 +39,10 @@ pub fn spawn_shell(
         })
         .map_err(|e| e.to_string())?;
 
-    let mut cmd = CommandBuilder::new_default_prog();
+    let mut cmd = match shell.as_deref() {
+        Some(s) if !s.is_empty() => CommandBuilder::new(s),
+        _ => CommandBuilder::new_default_prog(),
+    };
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
 

@@ -1,3 +1,4 @@
+mod config;
 mod pty;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -9,6 +10,7 @@ pub fn run() {
             pty::spawn_shell,
             pty::write_to_pty,
             pty::resize_pty,
+            config::get_config,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

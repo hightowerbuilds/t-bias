@@ -10,6 +10,7 @@ import {
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { PanesRoot } from "./Panes";
+import PromptStackerView from "./PromptStacker";
 import {
   splitPane,
   closePane,
@@ -21,6 +22,7 @@ import {
 import type { SplitPane, EditorPane } from "./pane-tree";
 import {
   GET_CONFIG_CMD,
+  GET_PANE_CWD_CMD,
   SAVE_SESSION_CMD,
   LOAD_SESSION_CMD,
   SAVE_NAMED_SESSION_CMD,
@@ -50,15 +52,23 @@ interface TabState {
   id: number;
   title: string;
   hasActivity: boolean;
+  returnTabId?: number;
   rootId: number;
   activePaneId: number;
   panes: PaneMap;
   paneTitles: Record<number, string>;
+  paneProcessTitles: Record<number, string>;
   paneCwds: Record<number, string>;
   zoomed: boolean;
 }
 
-function makeTab(): TabState {
+function dirname(path: string): string {
+  const idx = path.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return path.slice(0, idx);
+}
+
+function makeTab(cwd?: string): TabState {
   const paneId = newId();
   return {
     id: newId(),
@@ -66,14 +76,15 @@ function makeTab(): TabState {
     hasActivity: false,
     rootId: paneId,
     activePaneId: paneId,
-    panes: { [paneId]: { type: "terminal", id: paneId } },
+    panes: { [paneId]: { type: "terminal", id: paneId, cwd } },
     paneTitles: { [paneId]: "Shell" },
-    paneCwds: {},
+    paneProcessTitles: {},
+    paneCwds: cwd ? { [paneId]: cwd } : {},
     zoomed: false,
   };
 }
 
-function makeFileExplorerTab(): TabState {
+function makeFileExplorerTab(initialPath?: string): TabState {
   const paneId = newId();
   return {
     id: newId(),
@@ -83,6 +94,24 @@ function makeFileExplorerTab(): TabState {
     activePaneId: paneId,
     panes: { [paneId]: { type: "file-explorer", id: paneId } },
     paneTitles: { [paneId]: "Files" },
+    paneProcessTitles: {},
+    paneCwds: initialPath ? { [paneId]: initialPath } : {},
+    zoomed: false,
+  };
+}
+
+function makePromptStackerTab(returnTabId?: number): TabState {
+  const paneId = newId();
+  return {
+    id: newId(),
+    title: "Prompt Stacker",
+    hasActivity: false,
+    returnTabId,
+    rootId: paneId,
+    activePaneId: paneId,
+    panes: { [paneId]: { type: "prompt-stacker", id: paneId } },
+    paneTitles: { [paneId]: "Prompt Stacker" },
+    paneProcessTitles: {},
     paneCwds: {},
     zoomed: false,
   };
@@ -99,6 +128,7 @@ function makeEditorTab(filePath?: string): TabState {
     activePaneId: paneId,
     panes: { [paneId]: { type: "editor", id: paneId, filePath } as EditorPane },
     paneTitles: { [paneId]: title },
+    paneProcessTitles: {},
     paneCwds: {},
     zoomed: false,
   };
@@ -115,6 +145,7 @@ function tabToSavedTab(t: TabState): SavedTab {
     const p = t.panes[id];
     if (p.type === "terminal") return { type: "terminal" };
     if (p.type === "file-explorer") return { type: "file-explorer" };
+    if (p.type === "prompt-stacker") return { type: "prompt-stacker" };
     if (p.type === "editor") return { type: "editor", filePath: (p as EditorPane).filePath };
     const s = p as SplitPane;
     return { type: "split", dir: s.dir, ratio: s.ratio, a: serPane(s.a), b: serPane(s.b) };
@@ -130,25 +161,34 @@ function tabToSavedTab(t: TabState): SavedTab {
 function savedTabToTabState(saved: SavedTab): TabState {
   const leafPaneIds: number[] = [];
 
-  function buildPane(node: SavedPane): { id: number; panes: PaneMap } {
+  function buildPane(node: SavedPane): { id: number; panes: PaneMap; paneTitles: Record<number, string> } {
     if (node.type === "terminal") {
       const id = newId();
       leafPaneIds.push(id);
-      return { id, panes: { [id]: { type: "terminal", id } } };
+      return { id, panes: { [id]: { type: "terminal", id } }, paneTitles: { [id]: "Shell" } };
     }
     if (node.type === "file-explorer") {
       const id = newId();
       leafPaneIds.push(id);
-      return { id, panes: { [id]: { type: "file-explorer", id } } };
+      return { id, panes: { [id]: { type: "file-explorer", id } }, paneTitles: { [id]: "Files" } };
+    }
+    if (node.type === "prompt-stacker") {
+      const id = newId();
+      leafPaneIds.push(id);
+      return { id, panes: { [id]: { type: "terminal", id } }, paneTitles: { [id]: "Shell" } };
     }
     if (node.type === "editor") {
       const id = newId();
       leafPaneIds.push(id);
-      return { id, panes: { [id]: { type: "editor", id, filePath: node.filePath } as EditorPane } };
+      return {
+        id,
+        panes: { [id]: { type: "editor", id, filePath: node.filePath } as EditorPane },
+        paneTitles: { [id]: node.filePath ? node.filePath.split("/").pop()! : "Untitled" },
+      };
     }
     const splitId = newId();
-    const { id: aId, panes: aPanes } = buildPane(node.a!);
-    const { id: bId, panes: bPanes } = buildPane(node.b!);
+    const { id: aId, panes: aPanes, paneTitles: aTitles } = buildPane(node.a!);
+    const { id: bId, panes: bPanes, paneTitles: bTitles } = buildPane(node.b!);
     return {
       id: splitId,
       panes: {
@@ -156,24 +196,29 @@ function savedTabToTabState(saved: SavedTab): TabState {
         ...bPanes,
         [splitId]: { type: "split", id: splitId, dir: node.dir!, ratio: node.ratio!, a: aId, b: bId },
       },
+      paneTitles: {
+        ...aTitles,
+        ...bTitles,
+      },
     };
   }
 
-  const { id: rootId, panes } = buildPane(saved.layout);
+  const { id: rootId, panes, paneTitles } = buildPane(saved.layout);
   const activePaneId =
     leafPaneIds[Math.min(saved.activePaneIndex, leafPaneIds.length - 1)] ??
     leafPaneIds[0];
-  const paneTitles: Record<number, string> = {};
-  leafPaneIds.forEach((id) => { paneTitles[id] = "Shell"; });
+  const fallbackTitle = paneTitles[activePaneId] ?? "Shell";
+  const title = saved.title === "Prompt Stacker" ? fallbackTitle : saved.title ?? fallbackTitle;
 
   return {
     id: newId(),
-    title: saved.title ?? "Shell",
+    title,
     hasActivity: false,
     rootId,
     activePaneId,
     panes,
     paneTitles,
+    paneProcessTitles: {},
     paneCwds: {},
     zoomed: false,
   };
@@ -192,6 +237,7 @@ const App: Component = () => {
   const [namedSessions, setNamedSessions] = createSignal<string[]>([]);
   const [sessionsMenuOpen, setSessionsMenuOpen] = createSignal(false);
   const [saveNameValue, setSaveNameValue] = createSignal<string | null>(null);
+  const [promptStackerOpen, setPromptStackerOpen] = createSignal(false);
 
   // Tab store
   const [tabs, setTabs] = createStore<TabState[]>([makeTab()]);
@@ -199,7 +245,8 @@ const App: Component = () => {
 
   const tabIdx = () => tabs.findIndex((t) => t.id === activeTabId());
   const tab = () => tabs[tabIdx()];
-
+  const displayTitle = (t: TabState, paneId: number) =>
+    t.paneProcessTitles[paneId] ?? t.paneTitles[paneId] ?? "Shell";
   // ── Session: build + restore ─────────────────────────────────────────────
 
   const buildSessionData = (): SessionData => ({
@@ -214,6 +261,7 @@ const App: Component = () => {
     setTabs(restored);
     const idx = Math.min(data.activeTabIndex ?? 0, restored.length - 1);
     setActiveTabId(restored[idx].id);
+    setPromptStackerOpen(false);
   };
 
   const saveSession = () => {
@@ -224,6 +272,73 @@ const App: Component = () => {
     const names = (await invoke(LIST_NAMED_SESSIONS_CMD)) as string[];
     setNamedSessions(names);
   };
+
+  const startNewSession = () => {
+    const freshTab = makeTab();
+    setTabs([freshTab]);
+    setActiveTabId(freshTab.id);
+    setPendingRestore(null);
+    setPromptStackerOpen(false);
+    setSessionsMenuOpen(false);
+    setSaveNameValue(null);
+    setAppReady(true);
+  };
+
+  const resumePendingSession = () => {
+    const data = pendingRestore();
+    if (!data?.tabs?.length) return;
+    applySession(data);
+    setPendingRestore(null);
+    setPromptStackerOpen(false);
+    setSessionsMenuOpen(false);
+    setSaveNameValue(null);
+    setAppReady(true);
+  };
+
+  const openSessionLanding = async () => {
+    const snapshot = buildSessionData();
+    await invoke(SAVE_SESSION_CMD, { data: snapshot }).catch(() => {});
+    setPendingRestore(snapshot);
+    setPromptStackerOpen(false);
+    setSessionsMenuOpen(false);
+    setSaveNameValue(null);
+    await refreshNamedSessions().catch(() => {});
+    setAppReady(false);
+  };
+
+  const openPromptStacker = () => {
+    setSessionsMenuOpen(false);
+    setSaveNameValue(null);
+    setPromptStackerOpen(true);
+  };
+
+  const closePromptStacker = () => {
+    setPromptStackerOpen(false);
+  };
+
+  const resolveTabPath = async (t?: TabState): Promise<string | undefined> => {
+    if (!t) return undefined;
+
+    const activePane = t.panes[t.activePaneId];
+    const trackedPath = t.paneCwds[t.activePaneId];
+    if (trackedPath) return trackedPath;
+
+    if (activePane?.type === "editor") {
+      return activePane.filePath ? dirname(activePane.filePath) : undefined;
+    }
+
+    if (activePane?.type === "terminal") {
+      try {
+        return ((await invoke(GET_PANE_CWD_CMD, { paneId: t.activePaneId })) as string | null) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    }
+
+    return undefined;
+  };
+
+  const resolveActivePath = async (): Promise<string | undefined> => resolveTabPath(tab());
 
   // ── Open file in editor (called from file explorer) ──────────────────────
 
@@ -236,11 +351,24 @@ const App: Component = () => {
 
   // ── Tab operations ────────────────────────────────────────────────────────
 
-  const addTab = () => {
-    const t = makeTab();
+  const addTab = async () => {
+    const cwd = await resolveActivePath();
+    const t = makeTab(cwd);
     setTabs((prev) => [...prev, t]);
     setActiveTabId(t.id);
     saveSession();
+  };
+
+  const addFileExplorerTab = async () => {
+    const initialPath = await resolveActivePath();
+    const t = makeFileExplorerTab(initialPath);
+    setTabs((prev) => [...prev, t]);
+    setActiveTabId(t.id);
+    saveSession();
+  };
+
+  const addPromptStackerTab = () => {
+    openPromptStacker();
   };
 
   const switchTab = (id: number) => {
@@ -276,6 +404,7 @@ const App: Component = () => {
       d.rootId = newRootId;
       d.activePaneId = newLeafId;
       d.paneTitles[newLeafId] = "Shell";
+      delete d.paneProcessTitles[newLeafId];
     }));
     saveSession();
   };
@@ -295,8 +424,9 @@ const App: Component = () => {
       d.panes = newPanes;
       d.rootId = newRootId;
       d.activePaneId = focusId;
-      d.title = d.paneTitles[focusId] ?? "Shell";
+      d.title = displayTitle(d, focusId);
       delete d.paneTitles[t.activePaneId];
+      delete d.paneProcessTitles[t.activePaneId];
     }));
     saveSession();
   };
@@ -304,7 +434,7 @@ const App: Component = () => {
   const activatePane = (paneId: number) => {
     setTabs(tabIdx(), produce((d) => {
       d.activePaneId = paneId;
-      d.title = d.paneTitles[paneId] ?? "Shell";
+      d.title = displayTitle(d, paneId);
       d.hasActivity = false;
     }));
   };
@@ -340,7 +470,19 @@ const App: Component = () => {
     if (idx < 0) return;
     setTabs(idx, produce((d) => {
       d.paneTitles[paneId] = title;
-      if (d.activePaneId === paneId) d.title = title;
+      if (d.activePaneId === paneId && !d.paneProcessTitles[paneId]) {
+        d.title = title;
+      }
+    }));
+  };
+
+  const handleProcessTitleChange = (tabId: number, paneId: number, title: string | null) => {
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    setTabs(idx, produce((d) => {
+      if (title) d.paneProcessTitles[paneId] = title;
+      else delete d.paneProcessTitles[paneId];
+      if (d.activePaneId === paneId) d.title = displayTitle(d, paneId);
     }));
   };
 
@@ -377,7 +519,12 @@ const App: Component = () => {
 
   const loadNamedSession = async (name: string) => {
     const data = (await invoke(LOAD_NAMED_SESSION_CMD, { name })) as SessionData | null;
-    if (data?.tabs?.length) applySession(data);
+    if (data?.tabs?.length) {
+      applySession(data);
+      setPendingRestore(null);
+      setPromptStackerOpen(false);
+      setAppReady(true);
+    }
     setSessionsMenuOpen(false);
   };
 
@@ -389,6 +536,14 @@ const App: Component = () => {
   // ── Global keyboard shortcuts ─────────────────────────────────────────────
 
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if (promptStackerOpen()) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePromptStacker();
+      }
+      return;
+    }
+    if (!appReady()) return;
     if (!e.metaKey) return;
     const key = e.key.toLowerCase();
 
@@ -410,10 +565,7 @@ const App: Component = () => {
     // Cmd+Shift+E — file explorer
     if (key === "e" && e.shiftKey && !e.altKey) {
       e.preventDefault();
-      const t = makeFileExplorerTab();
-      setTabs((prev) => [...prev, t]);
-      setActiveTabId(t.id);
-      saveSession();
+      addFileExplorerTab();
       return;
     }
 
@@ -473,6 +625,7 @@ const App: Component = () => {
       } else if (mode === "ask") {
         setConfig(cfg);
         setPendingRestore(saved); // show prompt; don't set appReady yet
+        await refreshNamedSessions().catch(() => {});
       } else {
         // "never"
         setConfig(cfg);
@@ -483,6 +636,10 @@ const App: Component = () => {
       setAppReady(true);
     }
 
+    if (mode !== "ask") {
+      void refreshNamedSessions().catch(() => {});
+    }
+
     window.addEventListener("keydown", handleGlobalKeyDown, { capture: true });
 
     // Best-effort save when the page is unloaded.
@@ -491,10 +648,7 @@ const App: Component = () => {
     // Native menu bar events — "View > File Explorer" and "View > Code Editor"
     const { listen } = (window as any).__TAURI__.event;
     unlistenFileExplorer = await listen("open-file-explorer", () => {
-      const t = makeFileExplorerTab();
-      setTabs((prev) => [...prev, t]);
-      setActiveTabId(t.id);
-      saveSession();
+      addFileExplorerTab();
     });
     unlistenCodeEditor = await listen("open-code-editor", () => {
       const t = makeEditorTab();
@@ -517,47 +671,121 @@ const App: Component = () => {
     <Show when={config()}>
       <Switch>
 
-        {/* ── Restore prompt (ask mode) ───────────────────────────────── */}
-        <Match when={!appReady() && pendingRestore()}>
+        {/* ── Session landing ─────────────────────────────────────────── */}
+        <Match when={!appReady()}>
           <div style={{
             position: "fixed", inset: "0",
             background: "#111",
             display: "flex",
             "align-items": "center",
             "justify-content": "center",
-            "flex-direction": "column",
-            gap: "20px",
             "font-family": "Menlo, Monaco, 'Courier New', monospace",
             color: "#d4d4d4",
           }}>
-            <div style={{ "font-size": "14px", color: "#888" }}>t-bias</div>
-            <div style={{ "font-size": "13px" }}>
-              Restore previous session?
-              <span style={{ color: "#555", "margin-left": "6px" }}>
-                ({pendingRestore()!.tabs.length} tab{pendingRestore()!.tabs.length !== 1 ? "s" : ""})
-              </span>
-            </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => {
-                  applySession(pendingRestore()!);
-                  setPendingRestore(null);
-                  setAppReady(true);
-                }}
-                style={{
-                  background: "#5b8aff", border: "none", color: "#fff",
-                  padding: "6px 16px", "border-radius": "4px",
-                  "font-family": "inherit", "font-size": "12px", cursor: "pointer",
-                }}
-              >Restore</button>
-              <button
-                onClick={() => { setPendingRestore(null); setAppReady(true); }}
-                style={{
-                  background: "#2a2a2a", border: "1px solid #444", color: "#aaa",
-                  padding: "6px 16px", "border-radius": "4px",
-                  "font-family": "inherit", "font-size": "12px", cursor: "pointer",
-                }}
-              >New session</button>
+            <div style={{
+              width: "min(680px, calc(100vw - 48px))",
+              background: "#171717",
+              border: "1px solid #2d2d2d",
+              "border-radius": "14px",
+              padding: "26px",
+              "box-shadow": "0 24px 60px rgba(0,0,0,0.45)",
+              display: "flex",
+              "flex-direction": "column",
+              gap: "18px",
+            }}>
+              <div style={{ display: "flex", "justify-content": "space-between", gap: "18px", "align-items": "flex-start" }}>
+                <div>
+                  <div style={{ "font-size": "14px", color: "#888" }}>t-bias</div>
+                  <div style={{ "font-size": "18px", color: "#ececec", "margin-top": "8px" }}>Session Landing</div>
+                  <div style={{ "font-size": "12px", color: "#777", "margin-top": "6px", "line-height": "1.6" }}>
+                    Leave the current workspace, start fresh, or load a saved session.
+                  </div>
+                </div>
+                <Show when={pendingRestore()}>
+                  <div style={{
+                    "font-size": "11px",
+                    color: "#666",
+                    background: "#111",
+                    border: "1px solid #252525",
+                    "border-radius": "999px",
+                    padding: "7px 10px",
+                    "white-space": "nowrap",
+                  }}>
+                    {pendingRestore()!.tabs.length} tab{pendingRestore()!.tabs.length !== 1 ? "s" : ""} saved
+                  </div>
+                </Show>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", "flex-wrap": "wrap" }}>
+                <Show when={pendingRestore()}>
+                  <button
+                    onClick={resumePendingSession}
+                    style={{
+                      background: "#5b8aff", border: "none", color: "#fff",
+                      padding: "9px 16px", "border-radius": "8px",
+                      "font-family": "inherit", "font-size": "12px", cursor: "pointer",
+                    }}
+                  >Resume Session</button>
+                </Show>
+                <button
+                  onClick={startNewSession}
+                  style={{
+                    background: "#232323", border: "1px solid #444", color: "#d4d4d4",
+                    padding: "9px 16px", "border-radius": "8px",
+                    "font-family": "inherit", "font-size": "12px", cursor: "pointer",
+                  }}
+                >New Session</button>
+              </div>
+
+              <div style={{
+                border: "1px solid #252525",
+                "border-radius": "10px",
+                overflow: "hidden",
+                background: "#121212",
+              }}>
+                <div style={{
+                  padding: "12px 14px",
+                  "border-bottom": "1px solid #252525",
+                  "font-size": "11px",
+                  color: "#6f6f6f",
+                  "text-transform": "uppercase",
+                  "letter-spacing": "0.08em",
+                }}>
+                  Saved Sessions
+                </div>
+                <Show
+                  when={namedSessions().length > 0}
+                  fallback={
+                    <div style={{ padding: "16px 14px", color: "#555", "font-size": "12px" }}>
+                      No named sessions yet
+                    </div>
+                  }
+                >
+                  <div style={{ display: "flex", "flex-direction": "column" }}>
+                    <For each={namedSessions()}>
+                      {(name) => (
+                        <button
+                          onClick={() => void loadNamedSession(name)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#d4d4d4",
+                            cursor: "pointer",
+                            padding: "12px 14px",
+                            "text-align": "left",
+                            "font-family": "inherit",
+                            "font-size": "12px",
+                            "border-top": "1px solid #1d1d1d",
+                          }}
+                          title={`Load "${name}"`}
+                        >
+                          {name}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
             </div>
           </div>
         </Match>
@@ -655,20 +883,35 @@ const App: Component = () => {
                 }}
               >+</button>
 
-
-              {/* Sessions menu button — far right */}
+              {/* Prompt Stacker button — far right */}
               <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", "flex-shrink": "0" }}>
                 <button
-                  onClick={openSessionsMenu}
-                  title="Sessions (⌘⇧S to save)"
+                  onClick={() => void openSessionLanding()}
+                  title="Open session landing"
                   style={{
-                    background: sessionsMenuOpen() ? "#252525" : "none",
+                    background: "none",
+                    border: "none",
+                    color: "#666",
+                    cursor: "pointer",
+                    padding: "0 12px",
+                    "font-size": "11px",
+                    height: "100%",
+                    "border-left": "1px solid #222",
+                    "font-family": "Menlo, Monaco, 'Courier New', monospace",
+                  }}
+                >Shells</button>
+                <button
+                  onClick={addPromptStackerTab}
+                  title="Open Prompt Stacker"
+                  style={{
+                    background: "none",
                     border: "none", color: "#555",
                     cursor: "pointer", padding: "0 12px",
-                    "font-size": "14px", height: "100%",
+                    "font-size": "11px", height: "100%",
                     "border-left": "1px solid #222",
+                    "font-family": "Menlo, Monaco, 'Courier New', monospace",
                   }}
-                >≡</button>
+                >Stacker</button>
               </div>
 
               {/* Sessions dropdown */}
@@ -802,6 +1045,7 @@ const App: Component = () => {
                       paneCwds={t.paneCwds}
                       onActivate={activatePane}
                       onTitleChange={(paneId, title) => handleTitleChange(t.id, paneId, title)}
+                      onProcessTitleChange={(paneId, title) => handleProcessTitleChange(t.id, paneId, title)}
                       onCwdChange={(paneId, cwd) => handleCwdChange(t.id, paneId, cwd)}
                       onActivity={(paneId) => handleActivity(t.id, paneId)}
                       onRatioChange={handleRatioChange}
@@ -812,6 +1056,46 @@ const App: Component = () => {
                 )}
               </For>
             </div>
+
+            <Show when={promptStackerOpen()}>
+              <div
+                style={{
+                  position: "fixed",
+                  inset: "0",
+                  background: "rgba(0,0,0,0.58)",
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  padding: "24px",
+                  "z-index": "120",
+                }}
+                onClick={() => closePromptStacker()}
+              >
+                <div
+                  style={{
+                    width: "min(860px, calc(100vw - 48px))",
+                    height: "min(780px, calc(100vh - 48px))",
+                    background: "#171717",
+                    border: "1px solid #2d2d2d",
+                    "border-radius": "14px",
+                    padding: "26px",
+                    "box-shadow": "0 24px 60px rgba(0,0,0,0.45)",
+                    display: "flex",
+                    "flex-direction": "column",
+                    "min-height": "0",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <PromptStackerView
+                    config={config()!}
+                    isActive={promptStackerOpen()}
+                    shouldFocus={promptStackerOpen()}
+                    variant="modal"
+                    onClose={closePromptStacker}
+                  />
+                </div>
+              </div>
+            </Show>
 
           </div>
         </Match>

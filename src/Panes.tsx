@@ -6,11 +6,12 @@ import {
   onCleanup,
   type Component,
 } from "solid-js";
-import type { PaneMap, SplitPane, EditorPane, TerminalPane } from "./pane-tree";
+import type { PaneMap, SplitPane, EditorPane, TerminalPane, PromptStackerPane } from "./pane-tree";
 import TerminalView from "./Terminal";
 import EditorView from "./Editor";
 import FileExplorerView from "./FileExplorer";
 import FlipExplorerView from "./FlipExplorer";
+import PromptStackerView from "./PromptStacker";
 import type { AppConfig } from "./ipc/types";
 
 // ---------------------------------------------------------------------------
@@ -32,11 +33,13 @@ export interface PanesRootProps {
   paneCwds: Record<number, string>;
   onActivate: (paneId: number) => void;
   onTitleChange: (paneId: number, title: string) => void;
+  onProcessTitleChange: (paneId: number, title: string | null) => void;
   onCwdChange: (paneId: number, cwd: string) => void;
   onActivity: (paneId: number) => void;
   onRatioChange: (splitId: number, ratio: number) => void;
   onFlip?: (paneId: number) => void;
   onOpenFile?: (filePath: string) => void;
+  onBackToShell?: () => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +57,10 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
               <TerminalView
                 paneId={props.activePaneId}
                 config={props.config}
+                initialCwd={(props.panes[props.activePaneId] as TerminalPane)?.cwd}
                 isActive={true}
                 onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
+                onProcessTitleChange={(t) => props.onProcessTitleChange(props.activePaneId, t)}
                 onCwdChange={(cwd) => props.onCwdChange(props.activePaneId, cwd)}
                 onActivity={() => props.onActivity(props.activePaneId)}
               />
@@ -65,7 +70,9 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
                 paneId={props.activePaneId}
                 config={props.config}
                 isActive={true}
+                initialPath={props.paneCwds[props.activePaneId]}
                 onOpenFile={props.onOpenFile}
+                onRootPathChange={(path) => props.onCwdChange(props.activePaneId, path)}
               />
             </Match>
             <Match when={props.panes[props.activePaneId]?.type === "editor"}>
@@ -75,6 +82,14 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
                 config={props.config}
                 isActive={true}
                 onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
+              />
+            </Match>
+            <Match when={props.panes[props.activePaneId]?.type === "prompt-stacker"}>
+              <PromptStackerView
+                config={props.config}
+                isActive={true}
+                shouldFocus={true}
+                onBackToShell={props.onBackToShell}
               />
             </Match>
           </Switch>
@@ -144,8 +159,10 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
               <TerminalView
                 paneId={props.paneId}
                 config={props.config}
+                initialCwd={(pane() as TerminalPane)?.cwd}
                 isActive={props.paneId === props.activePaneId && !(pane() as TerminalPane)?.flipped}
                 onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
+                onProcessTitleChange={(t) => props.onProcessTitleChange(props.paneId, t)}
                 onCwdChange={(cwd) => props.onCwdChange(props.paneId, cwd)}
                 onActivity={() => props.onActivity(props.paneId)}
               />
@@ -188,7 +205,9 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
             paneId={props.paneId}
             config={props.config}
             isActive={props.paneId === props.activePaneId}
+            initialPath={props.paneCwds[props.paneId]}
             onOpenFile={props.onOpenFile}
+            onRootPathChange={(path) => props.onCwdChange(props.paneId, path)}
           />
         </div>
       </Match>
@@ -208,6 +227,24 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
             config={props.config}
             isActive={props.paneId === props.activePaneId}
             onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
+          />
+        </div>
+      </Match>
+
+      {/* Prompt Stacker leaf */}
+      <Match when={pane()?.type === "prompt-stacker"}>
+        <div
+          style={{ width: "100%", height: "100%", position: "relative" }}
+          onClick={() => props.onActivate(props.paneId)}
+        >
+          <Show when={props.paneId === props.activePaneId}>
+            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+          </Show>
+          <PromptStackerView
+            config={props.config}
+            isActive={props.paneId === props.activePaneId}
+            shouldFocus={props.paneId === props.activePaneId && !props.zoomed}
+            onBackToShell={props.onBackToShell}
           />
         </div>
       </Match>

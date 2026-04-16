@@ -12,6 +12,7 @@ export interface SpawnShellArgs {
   cols: number;
   rows: number;
   shell?: string;
+  cwd?: string;
 }
 
 /** write_to_pty: Send data (keystrokes, paste) to a pane's PTY. */
@@ -29,6 +30,11 @@ export interface ResizePtyArgs {
 
 /** close_pane: Kill a pane's PTY and free its resources. */
 export interface ClosePaneArgs {
+  pane_id: number;
+}
+
+/** get_pane_foreground_process_name: Query the active foreground app in a pane PTY. */
+export interface GetPaneForegroundProcessNameArgs {
   pane_id: number;
 }
 
@@ -89,12 +95,21 @@ export interface DirEntry {
   modified: number | null;
 }
 
+// ========================== Prompt Stacker ==========================
+
+export interface PromptRecord {
+  id: string;
+  text: string;
+  created_at: number;
+}
+
 // ========================== Session (layout persistence) ==========================
 
 /** Recursive pane layout — no IDs, freshly assigned on restore. */
 export type SavedPane =
   | { type: "terminal" }
   | { type: "file-explorer" }
+  | { type: "prompt-stacker" }
   | { type: "editor"; filePath?: string }
   | { type: "split"; dir: "h" | "v"; ratio: number; a: SavedPane; b: SavedPane };
 
@@ -124,6 +139,8 @@ export const SAVE_NAMED_SESSION_CMD   = "save_named_session"  as const;
 export const LOAD_NAMED_SESSION_CMD   = "load_named_session"  as const;
 export const LIST_NAMED_SESSIONS_CMD  = "list_named_sessions" as const;
 export const DELETE_NAMED_SESSION_CMD = "delete_named_session" as const;
+export const LIST_PROMPTS_CMD         = "list_prompts"         as const;
+export const SAVE_PROMPT_CMD          = "save_prompt"          as const;
 
 // Filesystem
 export const READ_DIR_CMD             = "read_dir"             as const;
@@ -134,3 +151,4 @@ export const CREATE_DIR_CMD           = "create_dir"           as const;
 export const DELETE_ENTRY_CMD         = "delete_entry"         as const;
 export const GET_HOME_DIR_CMD         = "get_home_dir"         as const;
 export const GET_PANE_CWD_CMD        = "get_pane_cwd"          as const;
+export const GET_PANE_FOREGROUND_PROCESS_NAME_CMD = "get_pane_foreground_process_name" as const;

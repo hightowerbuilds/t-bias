@@ -8,10 +8,16 @@ export interface TerminalPane {
   type: "terminal";
   id: number;
   flipped?: boolean;
+  cwd?: string;
 }
 
 export interface FileExplorerPane {
   type: "file-explorer";
+  id: number;
+}
+
+export interface PromptStackerPane {
+  type: "prompt-stacker";
   id: number;
 }
 
@@ -32,7 +38,7 @@ export interface SplitPane {
   b: number; // second child pane ID
 }
 
-export type Pane = TerminalPane | FileExplorerPane | EditorPane | SplitPane;
+export type Pane = TerminalPane | FileExplorerPane | PromptStackerPane | EditorPane | SplitPane;
 export type PaneMap = Record<number, Pane>;
 
 // ---------------------------------------------------------------------------

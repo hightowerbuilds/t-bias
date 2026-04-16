@@ -33,7 +33,9 @@ export interface FileExplorerViewProps {
   paneId: number;
   config: AppConfig;
   isActive: boolean;
+  initialPath?: string;
   onOpenFile?: (filePath: string) => void;
+  onRootPathChange?: (path: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +73,11 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
   const [newItemMode, setNewItemMode] = createSignal<{ parentPath: string; type: "file" | "dir" } | null>(null);
   const [newItemName, setNewItemName] = createSignal("");
 
+  const updateRootPath = (path: string) => {
+    setRootPath(path);
+    props.onRootPathChange?.(path);
+  };
+
   // Load a directory and return TreeNode[]
   const loadDir = async (path: string, depth: number): Promise<TreeNode[]> => {
     try {
@@ -89,16 +96,16 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
   // Initialize
   onMount(async () => {
     try {
-      const home = (await invoke(GET_HOME_DIR_CMD)) as string;
-      setRootPath(home);
-      const children = await loadDir(home, 0);
+      const startPath = props.initialPath || (await invoke(GET_HOME_DIR_CMD)) as string;
+      updateRootPath(startPath);
+      const children = await loadDir(startPath, 0);
       setNodes(children);
     } catch {}
   });
 
   // Navigate to path
   const navigateTo = async (path: string) => {
-    setRootPath(path);
+    updateRootPath(path);
     const children = await loadDir(path, 0);
     setNodes(children);
     setSelectedPath(null);

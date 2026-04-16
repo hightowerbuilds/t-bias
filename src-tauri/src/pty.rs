@@ -1,6 +1,7 @@
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
@@ -33,6 +34,7 @@ pub fn spawn_shell(
     cols: u16,
     rows: u16,
     shell: Option<String>,
+    cwd: Option<String>,
 ) -> Result<(), String> {
     let pty_system = NativePtySystem::default();
 
@@ -65,12 +67,22 @@ pub fn spawn_shell(
     cmd.env("TERM_PROGRAM", "t-bias");
     cmd.env("TERM_PROGRAM_VERSION", "0.1.0");
 
-    // Ensure HOME is set and start in the user's home directory.
-    // GUI apps on macOS may have cwd set to / or the .app bundle path.
+    // Ensure HOME is set. GUI apps on macOS may have cwd set to / or the
+    // .app bundle path, so default to HOME unless the frontend provided a cwd.
     if let Some(home) = dirs::home_dir() {
         let home_str = home.to_string_lossy().to_string();
         cmd.env("HOME", &home_str);
-        cmd.cwd(&home);
+
+        if let Some(cwd) = cwd.as_deref().filter(|cwd| !cwd.is_empty()) {
+            let cwd_path = std::path::PathBuf::from(cwd);
+            if cwd_path.exists() && cwd_path.is_dir() {
+                cmd.cwd(cwd_path);
+            } else {
+                cmd.cwd(&home);
+            }
+        } else {
+            cmd.cwd(&home);
+        }
     }
 
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
@@ -178,6 +190,112 @@ pub fn get_pane_cwd(
     }
 }
 
+/// Query the current foreground process name of a pane's PTY.
+#[tauri::command]
+pub fn get_pane_foreground_process_name(
+    state: tauri::State<'_, PtyState>,
+    pane_id: u32,
+) -> Result<Option<String>, String> {
+    let panes = state.panes.lock().map_err(|e| e.to_string())?;
+    let pane = match panes.get(&pane_id) {
+        Some(pane) => pane,
+        None => return Ok(None),
+    };
+
+    let fg_pid = match pane.master.process_group_leader() {
+        Some(pid) if pid > 0 => pid,
+        _ => return Ok(None),
+    };
+
+    if pane.child_pid == Some(fg_pid as u32) {
+        return Ok(None);
+    }
+
+    let process_name = match get_pid_name(fg_pid) {
+        Ok(name) if !name.is_empty() => name,
+        _ => return Ok(None),
+    };
+
+    if is_shell_process(&process_name) {
+        return Ok(None);
+    }
+
+    let exec_path = get_pid_executable_path(fg_pid).ok();
+    Ok(Some(format_process_title(&process_name, exec_path.as_deref())))
+}
+
+fn is_shell_process(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "tcsh" | "csh" | "nu" | "pwsh" | "powershell" | "login"
+    )
+}
+
+fn format_process_title(process_name: &str, exec_path: Option<&str>) -> String {
+    let process_name = process_name.trim();
+    let exec_basename = exec_path
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or(process_name)
+        .trim();
+
+    for candidate in [process_name, exec_basename] {
+        if let Some(title) = known_process_title(candidate) {
+            return title.to_string();
+        }
+    }
+
+    prettify_process_name(exec_basename)
+}
+
+fn known_process_title(name: &str) -> Option<&'static str> {
+    match name.to_ascii_lowercase().as_str() {
+        "claude" | "claude-code" => Some("Claude Code"),
+        "codex" => Some("Codex"),
+        "aider" => Some("Aider"),
+        "gemini" => Some("Gemini"),
+        "opencode" => Some("OpenCode"),
+        "goose" => Some("Goose"),
+        "cursor-agent" | "cursor-agent-cli" => Some("Cursor Agent"),
+        "qodo" => Some("Qodo"),
+        "amp" => Some("Amp"),
+        "vim" => Some("Vim"),
+        "nvim" => Some("Neovim"),
+        "tmux" => Some("tmux"),
+        "less" => Some("Less"),
+        "man" => Some("Man"),
+        "htop" => Some("htop"),
+        "top" => Some("top"),
+        _ => None,
+    }
+}
+
+fn prettify_process_name(name: &str) -> String {
+    let pretty = name
+        .split(|c: char| c == '-' || c == '_' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut out = String::new();
+                    out.extend(first.to_uppercase());
+                    out.push_str(&chars.as_str().to_ascii_lowercase());
+                    out
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if pretty.is_empty() {
+        "Shell".to_string()
+    } else {
+        pretty
+    }
+}
+
 /// Read a process's current working directory using macOS's proc_pidinfo.
 #[cfg(target_os = "macos")]
 fn get_pid_cwd(pid: i32) -> Result<String, String> {
@@ -203,6 +321,54 @@ fn get_pid_cwd(pid: i32) -> Result<String, String> {
 #[cfg(target_os = "linux")]
 fn get_pid_cwd(pid: i32) -> Result<String, String> {
     std::fs::read_link(format!("/proc/{}/cwd", pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn get_pid_name(pid: i32) -> Result<String, String> {
+    let mut buf = [0u8; 256];
+    let ret = unsafe {
+        libc::proc_name(
+            pid,
+            buf.as_mut_ptr() as *mut libc::c_void,
+            buf.len() as u32,
+        )
+    };
+    if ret <= 0 {
+        return Err("proc_name failed".to_string());
+    }
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(ret as usize);
+    Ok(String::from_utf8_lossy(&buf[..len]).trim().to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn get_pid_name(pid: i32) -> Result<String, String> {
+    std::fs::read_to_string(format!("/proc/{}/comm", pid))
+        .map(|s| s.trim().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn get_pid_executable_path(pid: i32) -> Result<String, String> {
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let ret = unsafe {
+        libc::proc_pidpath(
+            pid,
+            buf.as_mut_ptr() as *mut libc::c_void,
+            buf.len() as u32,
+        )
+    };
+    if ret <= 0 {
+        return Err("proc_pidpath failed".to_string());
+    }
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(ret as usize);
+    Ok(String::from_utf8_lossy(&buf[..len]).to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn get_pid_executable_path(pid: i32) -> Result<String, String> {
+    std::fs::read_link(format!("/proc/{}/exe", pid))
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| e.to_string())
 }

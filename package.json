@@ -22,6 +22,8 @@
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5",
+    "@fontsource/atkinson-hyperlegible": "^5.2.8",
+    "markdown-it": "^14.1.1",
     "solid-js": "^1.9.12"
   }
 }

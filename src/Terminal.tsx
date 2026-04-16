@@ -2,6 +2,7 @@ import { onMount, onCleanup, createSignal, createEffect, type Component } from "
 import { TerminalHost } from "./terminal/TerminalHost";
 import {
   SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD, CLOSE_PANE_CMD,
+  GET_PANE_FOREGROUND_PROCESS_NAME_CMD,
   type AppConfig,
 } from "./ipc/types";
 
@@ -12,10 +13,13 @@ export interface TerminalViewProps {
   /** Unique pane ID — used as the PTY identifier and event-name suffix. */
   paneId: number;
   config: AppConfig;
+  initialCwd?: string;
   /** Whether this pane currently has keyboard focus. */
   isActive: boolean;
   /** Called when the shell emits an OSC title change. */
   onTitleChange?: (title: string) => void;
+  /** Called when the foreground process in the PTY changes. */
+  onProcessTitleChange?: (title: string | null) => void;
   /** Called when output arrives while the pane is not active. */
   onActivity?: () => void;
   /** Called when the shell reports a working directory change (OSC 7). */
@@ -25,6 +29,7 @@ export interface TerminalViewProps {
 const TerminalView: Component<TerminalViewProps> = (props) => {
   let textCanvasRef!: HTMLCanvasElement;
   let terminal: TerminalHost | undefined;
+  let processTitlePoll: number | undefined;
   const [terminalReady, setTerminalReady] = createSignal(false);
 
   onMount(async () => {
@@ -83,10 +88,37 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
 
     const shell = config.shell || undefined;
     try {
-      await invoke(SPAWN_SHELL_CMD, { paneId: props.paneId, cols, rows, shell });
+      await invoke(SPAWN_SHELL_CMD, {
+        paneId: props.paneId,
+        cols,
+        rows,
+        shell,
+        cwd: props.initialCwd,
+      });
     } catch (err) {
       terminal!.write(`\r\n\x1b[31mFailed to spawn shell: ${err}\x1b[0m\r\n`);
     }
+
+    let lastProcessTitle: string | null | undefined;
+    const pollForegroundProcessTitle = async () => {
+      try {
+        const title = (await invoke(
+          GET_PANE_FOREGROUND_PROCESS_NAME_CMD,
+          { paneId: props.paneId },
+        )) as string | null;
+        if (title !== lastProcessTitle) {
+          lastProcessTitle = title;
+          props.onProcessTitleChange?.(title);
+        }
+      } catch {
+        // Ignore polling failures; the shell title path still works.
+      }
+    };
+
+    void pollForegroundProcessTitle();
+    processTitlePoll = window.setInterval(() => {
+      void pollForegroundProcessTitle();
+    }, 1200);
 
     terminal.onResize = (cols, rows) => {
       invoke(RESIZE_PTY_CMD, { paneId: props.paneId, cols, rows });
@@ -103,6 +135,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       ro.disconnect();
       unlistenOutput();
       unlistenExit();
+      if (processTitlePoll !== undefined) window.clearInterval(processTitlePoll);
       terminal?.dispose();
       invoke(CLOSE_PANE_CMD, { paneId: props.paneId }).catch(() => {});
     });

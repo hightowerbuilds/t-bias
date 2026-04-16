@@ -1,6 +1,7 @@
 mod config;
 mod fs_ops;
 mod pty;
+mod prompt_stacker;
 mod session;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,6 +30,9 @@ pub fn run() {
             fs_ops::delete_entry,
             fs_ops::get_home_dir,
             pty::get_pane_cwd,
+            pty::get_pane_foreground_process_name,
+            prompt_stacker::list_prompts,
+            prompt_stacker::save_prompt,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

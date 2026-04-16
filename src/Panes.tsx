@@ -141,34 +141,6 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
               <Show when={props.paneId === props.activePaneId}>
                 <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
               </Show>
-              {/* Hamburger flip button */}
-              <button
-                onClick={(e) => { e.stopPropagation(); props.onFlip?.(props.paneId); }}
-                title="Flip to explorer (⌘/)"
-                style={{
-                  position: "absolute",
-                  top: "6px",
-                  left: "6px",
-                  "z-index": "25",
-                  background: "rgba(30,30,30,0.7)",
-                  border: "1px solid #444",
-                  color: "#888",
-                  width: "26px",
-                  height: "26px",
-                  "border-radius": "4px",
-                  cursor: "pointer",
-                  display: "flex",
-                  "align-items": "center",
-                  "justify-content": "center",
-                  "font-size": "14px",
-                  "line-height": "1",
-                  padding: "0",
-                  opacity: "0.35",
-                  transition: "opacity 150ms ease",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
-              >☰</button>
               <TerminalView
                 paneId={props.paneId}
                 config={props.config}
@@ -192,34 +164,6 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
               <Show when={props.paneId === props.activePaneId}>
                 <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
               </Show>
-              {/* Hamburger flip button */}
-              <button
-                onClick={(e) => { e.stopPropagation(); props.onFlip?.(props.paneId); }}
-                title="Flip to terminal (⌘/)"
-                style={{
-                  position: "absolute",
-                  top: "6px",
-                  left: "6px",
-                  "z-index": "25",
-                  background: "rgba(30,30,30,0.7)",
-                  border: "1px solid #444",
-                  color: "#888",
-                  width: "26px",
-                  height: "26px",
-                  "border-radius": "4px",
-                  cursor: "pointer",
-                  display: "flex",
-                  "align-items": "center",
-                  "justify-content": "center",
-                  "font-size": "14px",
-                  "line-height": "1",
-                  padding: "0",
-                  opacity: "0.35",
-                  transition: "opacity 150ms ease",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
-              >☰</button>
               <FlipExplorerView
                 paneId={props.paneId}
                 config={props.config}

@@ -578,6 +578,30 @@ const App: Component = () => {
               "user-select": "none",
               position: "relative",
             }}>
+              {/* Flip — toggle active pane between terminal and explorer */}
+              <button
+                onClick={() => {
+                  const t = tab();
+                  if (t) toggleFlipPane(t.activePaneId);
+                }}
+                title="Flip pane (⌘/)"
+                style={{
+                  background: "none",
+                  border: "none",
+                  "border-right": "1px solid #222",
+                  color: "#777",
+                  cursor: "pointer",
+                  padding: "0 12px",
+                  "font-size": "11px",
+                  "line-height": "1",
+                  "flex-shrink": "0",
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  "font-family": "Menlo, Monaco, 'Courier New', monospace",
+                }}
+              >flip</button>
+
               <For each={tabs}>
                 {(t) => {
                   const isActive = () => t.id === activeTabId();
@@ -631,40 +655,6 @@ const App: Component = () => {
                 }}
               >+</button>
 
-              {/* File Explorer tab */}
-              <button
-                onClick={() => {
-                  const t = makeFileExplorerTab();
-                  setTabs((prev) => [...prev, t]);
-                  setActiveTabId(t.id);
-                  saveSession();
-                }}
-                title="File Explorer (⌘⇧E)"
-                style={{
-                  background: "none", border: "none", color: "#555",
-                  cursor: "pointer", padding: "0 10px",
-                  "font-size": "13px", "line-height": "1",
-                  "flex-shrink": "0", "align-self": "center",
-                }}
-              >{"\u{1F4C2}"}</button>
-
-              {/* Code Editor tab */}
-              <button
-                onClick={() => {
-                  const t = makeEditorTab();
-                  setTabs((prev) => [...prev, t]);
-                  setActiveTabId(t.id);
-                  saveSession();
-                }}
-                title="Code Editor"
-                style={{
-                  background: "none", border: "none", color: "#555",
-                  cursor: "pointer", padding: "0 10px",
-                  "font-size": "11px", "line-height": "1",
-                  "flex-shrink": "0", "align-self": "center",
-                  "font-family": "Menlo, Monaco, 'Courier New', monospace",
-                }}
-              >&lt;/&gt;</button>
 
               {/* Sessions menu button — far right */}
               <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", "flex-shrink": "0" }}>

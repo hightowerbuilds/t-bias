@@ -8,6 +8,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(pty::PtyState::new())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             pty::spawn_shell,
             pty::write_to_pty,

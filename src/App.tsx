@@ -600,7 +600,7 @@ const App: Component = () => {
                   "justify-content": "center",
                   "font-family": "Menlo, Monaco, 'Courier New', monospace",
                 }}
-              >flip</button>
+              >&lt;---</button>
 
               <For each={tabs}>
                 {(t) => {

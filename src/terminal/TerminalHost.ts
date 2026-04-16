@@ -115,13 +115,12 @@ export class TerminalHost {
     this.defaultFontSize = fontSize;
     this.renderer = new CanvasRenderer(textCanvas, { fontSize, fontFamily, theme: this.theme });
 
-    // Apply padding to the canvas container
+    // Apply padding by offsetting the canvas within its container
     if (this.padding > 0) {
-      const container = textCanvas.parentElement;
-      if (container) {
-        container.style.padding = `${this.padding}px`;
-        container.style.boxSizing = "border-box";
-      }
+      textCanvas.style.top = `${this.padding}px`;
+      textCanvas.style.left = `${this.padding}px`;
+      textCanvas.style.width = `calc(100% - ${this.padding * 2}px)`;
+      textCanvas.style.height = `calc(100% - ${this.padding * 2}px)`;
     }
 
     const rect = textCanvas.parentElement?.getBoundingClientRect() ?? {
@@ -181,7 +180,7 @@ export class TerminalHost {
     // Selection canvas (Layer 1)
     this.selectionCanvas = document.createElement("canvas");
     this.selectionCanvas.style.cssText =
-      "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;";
+      `position:absolute;top:${this.padding}px;left:${this.padding}px;width:calc(100% - ${this.padding * 2}px);height:calc(100% - ${this.padding * 2}px);pointer-events:none;`;
     container.appendChild(this.selectionCanvas);
     this.selCtx = this.selectionCanvas.getContext("2d", { alpha: true })!;
 
@@ -189,7 +188,7 @@ export class TerminalHost {
     this.cursorCanvas = document.createElement("canvas");
     this.cursorCanvas.tabIndex = 0;
     this.cursorCanvas.style.cssText =
-      "position:absolute;top:0;left:0;width:100%;height:100%;outline:none;";
+      `position:absolute;top:${this.padding}px;left:${this.padding}px;width:calc(100% - ${this.padding * 2}px);height:calc(100% - ${this.padding * 2}px);outline:none;`;
     container.appendChild(this.cursorCanvas);
     this.curCtx = this.cursorCanvas.getContext("2d", { alpha: true })!;
 
@@ -347,6 +346,25 @@ export class TerminalHost {
       return;
     }
 
+    // Cmd+V — canvas elements don't fire native `paste` events, so handle the
+    // shortcut here. We read via the Tauri clipboard plugin (Rust side) to
+    // avoid WebKit's "Paste" permission prompt on macOS.
+    if (e.metaKey && e.key === "v") {
+      e.preventDefault();
+      this.readClipboardText().then(text => {
+        if (text) this.sendPaste(text);
+      }).catch(() => { /* clipboard unavailable — ignore */ });
+      return;
+    }
+
+    // Cmd+Backspace — kill to start of line (readline/zsh/bash: Ctrl+U).
+    if (e.metaKey && e.key === "Backspace") {
+      e.preventDefault();
+      this.onData?.("\x15");
+      this.resetBlink();
+      return;
+    }
+
     if (e.metaKey && (e.key === "=" || e.key === "+")) {
       e.preventDefault();
       this.zoom(2);
@@ -436,13 +454,39 @@ export class TerminalHost {
   private handlePaste = (e: ClipboardEvent) => {
     e.preventDefault();
     const text = e.clipboardData?.getData("text");
-    if (!text) return;
+    if (text) this.sendPaste(text);
+  };
+
+  /** Send clipboard text to the PTY, wrapping in bracketed-paste markers when enabled. */
+  private sendPaste(text: string) {
     if (this.core.modes.bracketedPaste) {
       this.onData?.("\x1b[200~" + text + "\x1b[201~");
     } else {
       this.onData?.(text);
     }
-  };
+  }
+
+  /**
+   * Read clipboard text via the Tauri clipboard-manager plugin. This bypasses
+   * WebKit's "Allow paste" permission prompt on macOS by reading from the
+   * Rust side. Falls back to `navigator.clipboard.readText()` when not running
+   * under Tauri (e.g. the Vite dev server in a plain browser).
+   */
+  private async readClipboardText(): Promise<string | null> {
+    const tauri = (window as any).__TAURI__;
+    if (tauri?.core?.invoke) {
+      try {
+        const text = await tauri.core.invoke("plugin:clipboard-manager|read_text");
+        return typeof text === "string" ? text : null;
+      } catch {
+        // Fall through to navigator.clipboard
+      }
+    }
+    if (navigator.clipboard?.readText) {
+      return await navigator.clipboard.readText();
+    }
+    return null;
+  }
 
   // =========================================================================
   // Mouse
@@ -885,14 +929,9 @@ export class TerminalHost {
 
     // Paste
     menu.appendChild(makeItem("Paste", () => {
-      navigator.clipboard.readText().then(text => {
-        if (!text) return;
-        if (this.core.modes.bracketedPaste) {
-          this.onData?.("\x1b[200~" + text + "\x1b[201~");
-        } else {
-          this.onData?.(text);
-        }
-      });
+      this.readClipboardText().then(text => {
+        if (text) this.sendPaste(text);
+      }).catch(() => { /* clipboard unavailable — ignore */ });
     }));
 
     menu.appendChild(makeSeparator());

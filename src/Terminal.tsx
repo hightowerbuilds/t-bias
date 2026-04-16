@@ -122,6 +122,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
         width: "100%",
         height: "100%",
         overflow: "hidden",
+        background: props.config.theme.background,
       }}
     >
       {/* Layer 0: Text + Backgrounds — the IRenderer draws here */}

@@ -245,6 +245,7 @@ const FlipExplorerView: Component<FlipExplorerViewProps> = (props) => {
           "overflow-x": "hidden",
           "border-right": "1px solid #2e2e2e",
           "box-sizing": "border-box",
+          "padding-top": "8px",
         }}
       >
         <Show when={root()}>
@@ -342,6 +343,8 @@ const FlipEditorPreview: Component<FlipEditorPreviewProps> = (props) => {
           "line-height": "1.5",
           "white-space": "pre-wrap",
           "word-break": "break-word",
+          "user-select": "text",
+          cursor: "text",
         }}
       >
         {props.content}

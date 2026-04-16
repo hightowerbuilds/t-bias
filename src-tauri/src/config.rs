@@ -143,7 +143,7 @@ fn default_shell() -> String {
 }
 
 fn default_padding() -> u32 {
-    0
+    8
 }
 
 fn default_background() -> String {

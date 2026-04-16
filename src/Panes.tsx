@@ -6,10 +6,11 @@ import {
   onCleanup,
   type Component,
 } from "solid-js";
-import type { PaneMap, SplitPane, EditorPane } from "./pane-tree";
+import type { PaneMap, SplitPane, EditorPane, TerminalPane } from "./pane-tree";
 import TerminalView from "./Terminal";
 import EditorView from "./Editor";
 import FileExplorerView from "./FileExplorer";
+import FlipExplorerView from "./FlipExplorer";
 import type { AppConfig } from "./ipc/types";
 
 // ---------------------------------------------------------------------------
@@ -28,10 +29,13 @@ export interface PanesRootProps {
   activePaneId: number;
   config: AppConfig;
   zoomed: boolean;
+  paneCwds: Record<number, string>;
   onActivate: (paneId: number) => void;
   onTitleChange: (paneId: number, title: string) => void;
+  onCwdChange: (paneId: number, cwd: string) => void;
   onActivity: (paneId: number) => void;
   onRatioChange: (splitId: number, ratio: number) => void;
+  onFlip?: (paneId: number) => void;
   onOpenFile?: (filePath: string) => void;
 }
 
@@ -52,6 +56,7 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
                 config={props.config}
                 isActive={true}
                 onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
+                onCwdChange={(cwd) => props.onCwdChange(props.activePaneId, cwd)}
                 onActivity={() => props.onActivity(props.activePaneId)}
               />
             </Match>
@@ -102,22 +107,127 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
 
   return (
     <Switch>
-      {/* Terminal leaf */}
+      {/* Terminal leaf with flip animation */}
       <Match when={pane()?.type === "terminal"}>
         <div
-          style={{ width: "100%", height: "100%", position: "relative" }}
+          style={{
+            width: "100%",
+            height: "100%",
+            position: "relative",
+            perspective: "1200px",
+          }}
           onClick={() => props.onActivate(props.paneId)}
         >
-          <Show when={props.paneId === props.activePaneId}>
-            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
-          </Show>
-          <TerminalView
-            paneId={props.paneId}
-            config={props.config}
-            isActive={props.paneId === props.activePaneId}
-            onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
-            onActivity={() => props.onActivity(props.paneId)}
-          />
+          {/* Flip container */}
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              position: "relative",
+              "transform-style": "preserve-3d",
+              transition: "transform 400ms ease-in-out",
+              transform: (pane() as TerminalPane)?.flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+            }}
+          >
+            {/* Front face — Terminal */}
+            <div
+              style={{
+                position: "absolute",
+                inset: "0",
+                "backface-visibility": "hidden",
+                "z-index": (pane() as TerminalPane)?.flipped ? "0" : "1",
+              }}
+            >
+              <Show when={props.paneId === props.activePaneId}>
+                <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+              </Show>
+              {/* Hamburger flip button */}
+              <button
+                onClick={(e) => { e.stopPropagation(); props.onFlip?.(props.paneId); }}
+                title="Flip to explorer (⌘/)"
+                style={{
+                  position: "absolute",
+                  top: "6px",
+                  left: "6px",
+                  "z-index": "25",
+                  background: "rgba(30,30,30,0.7)",
+                  border: "1px solid #444",
+                  color: "#888",
+                  width: "26px",
+                  height: "26px",
+                  "border-radius": "4px",
+                  cursor: "pointer",
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  "font-size": "14px",
+                  "line-height": "1",
+                  padding: "0",
+                  opacity: "0.35",
+                  transition: "opacity 150ms ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
+              >☰</button>
+              <TerminalView
+                paneId={props.paneId}
+                config={props.config}
+                isActive={props.paneId === props.activePaneId && !(pane() as TerminalPane)?.flipped}
+                onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
+                onCwdChange={(cwd) => props.onCwdChange(props.paneId, cwd)}
+                onActivity={() => props.onActivity(props.paneId)}
+              />
+            </div>
+
+            {/* Back face — File Explorer */}
+            <div
+              style={{
+                position: "absolute",
+                inset: "0",
+                "backface-visibility": "hidden",
+                transform: "rotateY(180deg)",
+                "z-index": (pane() as TerminalPane)?.flipped ? "1" : "0",
+              }}
+            >
+              <Show when={props.paneId === props.activePaneId}>
+                <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+              </Show>
+              {/* Hamburger flip button */}
+              <button
+                onClick={(e) => { e.stopPropagation(); props.onFlip?.(props.paneId); }}
+                title="Flip to terminal (⌘/)"
+                style={{
+                  position: "absolute",
+                  top: "6px",
+                  left: "6px",
+                  "z-index": "25",
+                  background: "rgba(30,30,30,0.7)",
+                  border: "1px solid #444",
+                  color: "#888",
+                  width: "26px",
+                  height: "26px",
+                  "border-radius": "4px",
+                  cursor: "pointer",
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  "font-size": "14px",
+                  "line-height": "1",
+                  padding: "0",
+                  opacity: "0.35",
+                  transition: "opacity 150ms ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
+              >☰</button>
+              <FlipExplorerView
+                paneId={props.paneId}
+                config={props.config}
+                isActive={props.paneId === props.activePaneId && (pane() as TerminalPane)?.flipped}
+                cwd={props.paneCwds[props.paneId]}
+              />
+            </div>
+          </div>
         </div>
       </Match>
 

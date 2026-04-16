@@ -133,3 +133,4 @@ export const MOVE_ENTRY_CMD           = "move_entry"           as const;
 export const CREATE_DIR_CMD           = "create_dir"           as const;
 export const DELETE_ENTRY_CMD         = "delete_entry"         as const;
 export const GET_HOME_DIR_CMD         = "get_home_dir"         as const;
+export const GET_PANE_CWD_CMD        = "get_pane_cwd"          as const;

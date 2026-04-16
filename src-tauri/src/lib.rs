@@ -27,6 +27,7 @@ pub fn run() {
             fs_ops::create_dir,
             fs_ops::delete_entry,
             fs_ops::get_home_dir,
+            pty::get_pane_cwd,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

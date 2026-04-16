@@ -30,6 +30,7 @@ export class TerminalCore {
   onResponse?: (data: string) => void;
   onTitleChange?: (title: string) => void;
   onClipboard?: (text: string) => void;
+  onCwdChange?: (cwd: string) => void;
 
   constructor(cols: number, rows: number, scrollbackLimit = 5000) {
     this.cols = cols;
@@ -39,7 +40,20 @@ export class TerminalCore {
     this.screen.onResponse = (data) => this.onResponse?.(data);
     this.screen.onClipboard = (payload) => this.handleOsc52(payload);
     this.screen.onShellIntegration = (mark, param) => this.handleShellIntegration(mark, param);
+    this.screen.onCwd = (uri) => this.handleCwd(uri);
     this.parser = new Parser(this.screen);
+  }
+
+  /** Parse OSC 7 URI (file://hostname/path) and fire onCwdChange. */
+  private handleCwd(uri: string): void {
+    try {
+      const url = new URL(uri);
+      const path = decodeURIComponent(url.pathname);
+      if (path) this.onCwdChange?.(path);
+    } catch {
+      // Bare path (no file:// prefix) — use as-is
+      if (uri.startsWith("/")) this.onCwdChange?.(uri);
+    }
   }
 
   // =========================================================================

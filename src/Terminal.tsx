@@ -18,6 +18,8 @@ export interface TerminalViewProps {
   onTitleChange?: (title: string) => void;
   /** Called when output arrives while the pane is not active. */
   onActivity?: () => void;
+  /** Called when the shell reports a working directory change (OSC 7). */
+  onCwdChange?: (cwd: string) => void;
 }
 
 const TerminalView: Component<TerminalViewProps> = (props) => {
@@ -59,6 +61,10 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
 
     terminal.onTitleChange = (title) => {
       props.onTitleChange?.(title);
+    };
+
+    terminal.onCwdChange = (cwd) => {
+      props.onCwdChange?.(cwd);
     };
 
     const unlistenOutput = await listen(

@@ -10,6 +10,7 @@ const READ_BUF_SIZE: usize = 65536; // 64KB
 struct PaneState {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
+    child_pid: Option<u32>,
 }
 
 pub struct PtyState {
@@ -61,6 +62,8 @@ pub fn spawn_shell(
 
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "t-bias");
+    cmd.env("TERM_PROGRAM_VERSION", "0.1.0");
 
     // Ensure HOME is set and start in the user's home directory.
     // GUI apps on macOS may have cwd set to / or the .app bundle path.
@@ -71,6 +74,7 @@ pub fn spawn_shell(
     }
 
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child_pid = child.process_id();
     drop(pair.slave);
 
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -78,7 +82,7 @@ pub fn spawn_shell(
 
     {
         let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
-        panes.insert(pane_id, PaneState { writer, master: pair.master });
+        panes.insert(pane_id, PaneState { writer, master: pair.master, child_pid });
     }
 
     // Reader thread: streams PTY output to the frontend via pane-specific event.
@@ -155,4 +159,50 @@ pub fn close_pane(
     let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
     panes.remove(&pane_id);
     Ok(())
+}
+
+/// Query the current working directory of a pane's shell process.
+#[tauri::command]
+pub fn get_pane_cwd(
+    state: tauri::State<'_, PtyState>,
+    pane_id: u32,
+) -> Result<Option<String>, String> {
+    let panes = state.panes.lock().map_err(|e| e.to_string())?;
+    let pid = match panes.get(&pane_id).and_then(|p| p.child_pid) {
+        Some(pid) => pid,
+        None => return Ok(None),
+    };
+    match get_pid_cwd(pid as i32) {
+        Ok(cwd) => Ok(Some(cwd)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Read a process's current working directory using macOS's proc_pidinfo.
+#[cfg(target_os = "macos")]
+fn get_pid_cwd(pid: i32) -> Result<String, String> {
+    use std::mem;
+    unsafe {
+        let mut info: libc::proc_vnodepathinfo = mem::zeroed();
+        let size = mem::size_of::<libc::proc_vnodepathinfo>() as i32;
+        let ret = libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        );
+        if ret <= 0 {
+            return Err("proc_pidinfo failed".to_string());
+        }
+        let cstr = std::ffi::CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const _);
+        Ok(cstr.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn get_pid_cwd(pid: i32) -> Result<String, String> {
+    std::fs::read_link(format!("/proc/{}/cwd", pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
 }

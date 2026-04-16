@@ -3710,6 +3710,7 @@ name = "t-bias"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "libc",
  "log",
  "portable-pty",
  "serde",

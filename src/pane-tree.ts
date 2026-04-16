@@ -7,6 +7,7 @@
 export interface TerminalPane {
   type: "terminal";
   id: number;
+  flipped?: boolean;
 }
 
 export interface FileExplorerPane {
@@ -158,4 +159,14 @@ export function findAdjacent(
   const step = dir === "right" || dir === "down" ? 1 : -1;
   const next = idx + step;
   return next >= 0 && next < ids.length ? ids[next] : null;
+}
+
+/** Toggle the flip state of a terminal pane. */
+export function toggleFlip(panes: PaneMap, targetId: number): PaneMap {
+  const pane = panes[targetId];
+  if (!pane || pane.type !== "terminal") return panes;
+  return {
+    ...panes,
+    [targetId]: { ...pane, flipped: !pane.flipped },
+  };
 }

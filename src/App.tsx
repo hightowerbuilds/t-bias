@@ -15,6 +15,7 @@ import {
   closePane,
   leafIds,
   findAdjacent,
+  toggleFlip,
   type PaneMap,
 } from "./pane-tree";
 import type { SplitPane, EditorPane } from "./pane-tree";
@@ -53,6 +54,7 @@ interface TabState {
   activePaneId: number;
   panes: PaneMap;
   paneTitles: Record<number, string>;
+  paneCwds: Record<number, string>;
   zoomed: boolean;
 }
 
@@ -66,6 +68,7 @@ function makeTab(): TabState {
     activePaneId: paneId,
     panes: { [paneId]: { type: "terminal", id: paneId } },
     paneTitles: { [paneId]: "Shell" },
+    paneCwds: {},
     zoomed: false,
   };
 }
@@ -80,6 +83,7 @@ function makeFileExplorerTab(): TabState {
     activePaneId: paneId,
     panes: { [paneId]: { type: "file-explorer", id: paneId } },
     paneTitles: { [paneId]: "Files" },
+    paneCwds: {},
     zoomed: false,
   };
 }
@@ -95,6 +99,7 @@ function makeEditorTab(filePath?: string): TabState {
     activePaneId: paneId,
     panes: { [paneId]: { type: "editor", id: paneId, filePath } as EditorPane },
     paneTitles: { [paneId]: title },
+    paneCwds: {},
     zoomed: false,
   };
 }
@@ -169,6 +174,7 @@ function savedTabToTabState(saved: SavedTab): TabState {
     activePaneId,
     panes,
     paneTitles,
+    paneCwds: {},
     zoomed: false,
   };
 }
@@ -310,6 +316,14 @@ const App: Component = () => {
     if (adj !== null) activatePane(adj);
   };
 
+  const toggleFlipPane = (paneId: number) => {
+    const idx = tabIdx();
+    const t = tab();
+    if (!t) return;
+    const newPanes = toggleFlip(t.panes, paneId);
+    setTabs(idx, "panes", newPanes);
+  };
+
   const toggleZoom = () => setTabs(tabIdx(), "zoomed", (z) => !z);
 
   const handleRatioChange = (splitId: number, ratio: number) => {
@@ -327,6 +341,14 @@ const App: Component = () => {
     setTabs(idx, produce((d) => {
       d.paneTitles[paneId] = title;
       if (d.activePaneId === paneId) d.title = title;
+    }));
+  };
+
+  const handleCwdChange = (tabId: number, paneId: number, cwd: string) => {
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    setTabs(idx, produce((d) => {
+      d.paneCwds[paneId] = cwd;
     }));
   };
 
@@ -376,6 +398,14 @@ const App: Component = () => {
     if (key === "d" && e.shiftKey && !e.altKey)  { e.preventDefault(); splitActivePane("v"); return; }
 
     if (e.key === "Enter" && e.shiftKey && !e.altKey) { e.preventDefault(); toggleZoom(); return; }
+
+    // Cmd+/ — flip terminal to file explorer
+    if (e.key === "/" && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      const t = tab();
+      if (t) toggleFlipPane(t.activePaneId);
+      return;
+    }
 
     // Cmd+Shift+E — file explorer
     if (key === "e" && e.shiftKey && !e.altKey) {
@@ -779,10 +809,13 @@ const App: Component = () => {
                       activePaneId={t.activePaneId}
                       config={config()!}
                       zoomed={t.zoomed}
+                      paneCwds={t.paneCwds}
                       onActivate={activatePane}
                       onTitleChange={(paneId, title) => handleTitleChange(t.id, paneId, title)}
+                      onCwdChange={(paneId, cwd) => handleCwdChange(t.id, paneId, cwd)}
                       onActivity={(paneId) => handleActivity(t.id, paneId)}
                       onRatioChange={handleRatioChange}
+                      onFlip={toggleFlipPane}
                       onOpenFile={openFileInEditor}
                     />
                   </div>

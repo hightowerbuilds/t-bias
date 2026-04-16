@@ -98,6 +98,7 @@ export class TerminalHost {
   onData?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
   onTitleChange?: (title: string) => void;
+  onCwdChange?: (cwd: string) => void;
 
   constructor(textCanvas: HTMLCanvasElement, options: TerminalOptions = {}) {
     this.textCanvas = textCanvas;
@@ -137,6 +138,7 @@ export class TerminalHost {
     this.core.cursorShape = this.cursorStyle;
     this.core.onResponse = (data) => this.onData?.(data);
     this.core.onTitleChange = (title) => this.onTitleChange?.(title);
+    this.core.onCwdChange = (cwd) => this.onCwdChange?.(cwd);
 
     this.renderer.resize(this.cols, this.rows);
 

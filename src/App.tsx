@@ -31,9 +31,8 @@ import {
   DELETE_NAMED_SESSION_CMD,
   type AppConfig,
   type SessionData,
-  type SavedPane,
-  type SavedTab,
 } from "./ipc/types";
+import { savedTabToTabState, tabToSavedTab } from "./session-state";
 
 const { invoke } = (window as any).__TAURI__.core;
 
@@ -135,94 +134,7 @@ function makeEditorTab(filePath?: string): TabState {
 }
 
 const TAB_BAR_H = 30;
-
-// ---------------------------------------------------------------------------
-// Session helpers
-// ---------------------------------------------------------------------------
-
-function tabToSavedTab(t: TabState): SavedTab {
-  function serPane(id: number): SavedPane {
-    const p = t.panes[id];
-    if (p.type === "terminal") return { type: "terminal" };
-    if (p.type === "file-explorer") return { type: "file-explorer" };
-    if (p.type === "prompt-stacker") return { type: "prompt-stacker" };
-    if (p.type === "editor") return { type: "editor", filePath: (p as EditorPane).filePath };
-    const s = p as SplitPane;
-    return { type: "split", dir: s.dir, ratio: s.ratio, a: serPane(s.a), b: serPane(s.b) };
-  }
-  const leaves = leafIds(t.panes, t.rootId);
-  return {
-    layout: serPane(t.rootId),
-    activePaneIndex: Math.max(0, leaves.indexOf(t.activePaneId)),
-    title: t.title,
-  };
-}
-
-function savedTabToTabState(saved: SavedTab): TabState {
-  const leafPaneIds: number[] = [];
-
-  function buildPane(node: SavedPane): { id: number; panes: PaneMap; paneTitles: Record<number, string> } {
-    if (node.type === "terminal") {
-      const id = newId();
-      leafPaneIds.push(id);
-      return { id, panes: { [id]: { type: "terminal", id } }, paneTitles: { [id]: "Shell" } };
-    }
-    if (node.type === "file-explorer") {
-      const id = newId();
-      leafPaneIds.push(id);
-      return { id, panes: { [id]: { type: "file-explorer", id } }, paneTitles: { [id]: "Files" } };
-    }
-    if (node.type === "prompt-stacker") {
-      const id = newId();
-      leafPaneIds.push(id);
-      return { id, panes: { [id]: { type: "terminal", id } }, paneTitles: { [id]: "Shell" } };
-    }
-    if (node.type === "editor") {
-      const id = newId();
-      leafPaneIds.push(id);
-      return {
-        id,
-        panes: { [id]: { type: "editor", id, filePath: node.filePath } as EditorPane },
-        paneTitles: { [id]: node.filePath ? node.filePath.split("/").pop()! : "Untitled" },
-      };
-    }
-    const splitId = newId();
-    const { id: aId, panes: aPanes, paneTitles: aTitles } = buildPane(node.a!);
-    const { id: bId, panes: bPanes, paneTitles: bTitles } = buildPane(node.b!);
-    return {
-      id: splitId,
-      panes: {
-        ...aPanes,
-        ...bPanes,
-        [splitId]: { type: "split", id: splitId, dir: node.dir!, ratio: node.ratio!, a: aId, b: bId },
-      },
-      paneTitles: {
-        ...aTitles,
-        ...bTitles,
-      },
-    };
-  }
-
-  const { id: rootId, panes, paneTitles } = buildPane(saved.layout);
-  const activePaneId =
-    leafPaneIds[Math.min(saved.activePaneIndex, leafPaneIds.length - 1)] ??
-    leafPaneIds[0];
-  const fallbackTitle = paneTitles[activePaneId] ?? "Shell";
-  const title = saved.title === "Prompt Stacker" ? fallbackTitle : saved.title ?? fallbackTitle;
-
-  return {
-    id: newId(),
-    title,
-    hasActivity: false,
-    rootId,
-    activePaneId,
-    panes,
-    paneTitles,
-    paneProcessTitles: {},
-    paneCwds: {},
-    zoomed: false,
-  };
-}
+const SESSION_SAVE_DEBOUNCE_MS = 250;
 
 // ---------------------------------------------------------------------------
 // App
@@ -242,6 +154,7 @@ const App: Component = () => {
   // Tab store
   const [tabs, setTabs] = createStore<TabState[]>([makeTab()]);
   const [activeTabId, setActiveTabId] = createSignal<number>(tabs[0].id);
+  let sessionSaveTimer: number | undefined;
 
   const tabIdx = () => tabs.findIndex((t) => t.id === activeTabId());
   const tab = () => tabs[tabIdx()];
@@ -249,23 +162,77 @@ const App: Component = () => {
     t.paneProcessTitles[paneId] ?? t.paneTitles[paneId] ?? "Shell";
   // ── Session: build + restore ─────────────────────────────────────────────
 
-  const buildSessionData = (): SessionData => ({
-    version: 1,
-    activeTabIndex: Math.max(0, tabIdx()),
-    tabs: tabs.map(tabToSavedTab),
-  });
+  const resolveTrackedPaneCwdsForTab = async (t: TabState): Promise<Record<number, string>> => {
+    const next = { ...t.paneCwds };
+    const terminals = Object.values(t.panes).filter((pane) => pane.type === "terminal");
+
+    await Promise.all(terminals.map(async (pane) => {
+      if (next[pane.id]) return;
+      try {
+        const cwd = ((await invoke(GET_PANE_CWD_CMD, { paneId: pane.id })) as string | null) ?? undefined;
+        if (cwd) next[pane.id] = cwd;
+      } catch {
+        // Ignore panes that cannot currently report cwd.
+      }
+    }));
+
+    return next;
+  };
+
+  const buildSessionData = async (): Promise<SessionData> => {
+    const hydratedTabs = await Promise.all(
+      tabs.map(async (t) => ({
+        ...t,
+        paneCwds: await resolveTrackedPaneCwdsForTab(t),
+      })),
+    );
+
+    return {
+      version: 1,
+      activeTabIndex: Math.max(0, tabIdx()),
+      tabs: hydratedTabs.map(tabToSavedTab),
+    };
+  };
+
+  const cancelScheduledSessionSave = () => {
+    if (sessionSaveTimer !== undefined) {
+      window.clearTimeout(sessionSaveTimer);
+      sessionSaveTimer = undefined;
+    }
+  };
 
   const applySession = (data: SessionData) => {
+    cancelScheduledSessionSave();
     if (!data.tabs?.length) return;
-    const restored = data.tabs.map(savedTabToTabState);
+    const restored = data.tabs.map((saved) => savedTabToTabState(saved, newId));
     setTabs(restored);
     const idx = Math.min(data.activeTabIndex ?? 0, restored.length - 1);
     setActiveTabId(restored[idx].id);
     setPromptStackerOpen(false);
   };
 
-  const saveSession = () => {
-    invoke(SAVE_SESSION_CMD, { data: buildSessionData() }).catch(() => {});
+  const saveSession = async () => {
+    const data = await buildSessionData();
+    await invoke(SAVE_SESSION_CMD, { data }).catch(() => {});
+  };
+
+  const scheduleSessionSave = () => {
+    if (!appReady()) return;
+    cancelScheduledSessionSave();
+    sessionSaveTimer = window.setTimeout(() => {
+      sessionSaveTimer = undefined;
+      void saveSession();
+    }, SESSION_SAVE_DEBOUNCE_MS);
+  };
+
+  const flushSessionSave = async () => {
+    cancelScheduledSessionSave();
+    if (!appReady()) return;
+    await saveSession();
+  };
+
+  const handleBeforeUnload = () => {
+    void flushSessionSave();
   };
 
   const refreshNamedSessions = async () => {
@@ -274,6 +241,7 @@ const App: Component = () => {
   };
 
   const startNewSession = () => {
+    cancelScheduledSessionSave();
     const freshTab = makeTab();
     setTabs([freshTab]);
     setActiveTabId(freshTab.id);
@@ -296,7 +264,7 @@ const App: Component = () => {
   };
 
   const openSessionLanding = async () => {
-    const snapshot = buildSessionData();
+    const snapshot = await buildSessionData();
     await invoke(SAVE_SESSION_CMD, { data: snapshot }).catch(() => {});
     setPendingRestore(snapshot);
     setPromptStackerOpen(false);
@@ -346,7 +314,7 @@ const App: Component = () => {
     const t = makeEditorTab(filePath);
     setTabs((prev) => [...prev, t]);
     setActiveTabId(t.id);
-    saveSession();
+    scheduleSessionSave();
   };
 
   // ── Tab operations ────────────────────────────────────────────────────────
@@ -356,7 +324,7 @@ const App: Component = () => {
     const t = makeTab(cwd);
     setTabs((prev) => [...prev, t]);
     setActiveTabId(t.id);
-    saveSession();
+    scheduleSessionSave();
   };
 
   const addFileExplorerTab = async () => {
@@ -364,7 +332,7 @@ const App: Component = () => {
     const t = makeFileExplorerTab(initialPath);
     setTabs((prev) => [...prev, t]);
     setActiveTabId(t.id);
-    saveSession();
+    scheduleSessionSave();
   };
 
   const addPromptStackerTab = () => {
@@ -375,7 +343,7 @@ const App: Component = () => {
     setActiveTabId(id);
     const idx = tabs.findIndex((t) => t.id === id);
     if (idx >= 0) setTabs(idx, "hasActivity", false);
-    saveSession();
+    scheduleSessionSave();
   };
 
   const removeTab = (id: number) => {
@@ -386,7 +354,7 @@ const App: Component = () => {
       setActiveTabId(next.id);
     }
     setTabs((prev) => prev.filter((t) => t.id !== id));
-    saveSession();
+    scheduleSessionSave();
   };
 
   // ── Pane operations ───────────────────────────────────────────────────────
@@ -406,7 +374,7 @@ const App: Component = () => {
       d.paneTitles[newLeafId] = "Shell";
       delete d.paneProcessTitles[newLeafId];
     }));
-    saveSession();
+    scheduleSessionSave();
   };
 
   const closeActivePane = () => {
@@ -428,7 +396,7 @@ const App: Component = () => {
       delete d.paneTitles[t.activePaneId];
       delete d.paneProcessTitles[t.activePaneId];
     }));
-    saveSession();
+    scheduleSessionSave();
   };
 
   const activatePane = (paneId: number) => {
@@ -489,9 +457,11 @@ const App: Component = () => {
   const handleCwdChange = (tabId: number, paneId: number, cwd: string) => {
     const idx = tabs.findIndex((t) => t.id === tabId);
     if (idx < 0) return;
+    if (tabs[idx].paneCwds[paneId] === cwd) return;
     setTabs(idx, produce((d) => {
       d.paneCwds[paneId] = cwd;
     }));
+    scheduleSessionSave();
   };
 
   const handleActivity = (tabId: number, paneId: number) => {
@@ -512,7 +482,8 @@ const App: Component = () => {
 
   const saveNamedSession = async (name: string) => {
     if (!name.trim()) return;
-    await invoke(SAVE_NAMED_SESSION_CMD, { name: name.trim(), data: buildSessionData() });
+    const data = await buildSessionData();
+    await invoke(SAVE_NAMED_SESSION_CMD, { name: name.trim(), data });
     setSaveNameValue(null);
     await refreshNamedSessions();
   };
@@ -643,7 +614,7 @@ const App: Component = () => {
     window.addEventListener("keydown", handleGlobalKeyDown, { capture: true });
 
     // Best-effort save when the page is unloaded.
-    window.addEventListener("beforeunload", saveSession);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     // Native menu bar events — "View > File Explorer" and "View > Code Editor"
     const { listen } = (window as any).__TAURI__.event;
@@ -654,13 +625,14 @@ const App: Component = () => {
       const t = makeEditorTab();
       setTabs((prev) => [...prev, t]);
       setActiveTabId(t.id);
-      saveSession();
+      scheduleSessionSave();
     });
   });
 
   onCleanup(() => {
     window.removeEventListener("keydown", handleGlobalKeyDown, { capture: true });
-    window.removeEventListener("beforeunload", saveSession);
+    window.removeEventListener("beforeunload", handleBeforeUnload);
+    cancelScheduledSessionSave();
     unlistenFileExplorer?.();
     unlistenCodeEditor?.();
   });

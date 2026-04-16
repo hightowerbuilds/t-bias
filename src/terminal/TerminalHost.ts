@@ -21,6 +21,7 @@ export class TerminalHost {
   private textCanvas: HTMLCanvasElement;           // Layer 0: text + backgrounds
   private selectionCanvas: HTMLCanvasElement | null = null; // Layer 1: selection overlay
   private cursorCanvas: HTMLCanvasElement | null = null;    // Layer 2: cursor
+  private inputSink: HTMLTextAreaElement | null = null;     // Hidden text sink for IME/composition
 
   private selCtx: CanvasRenderingContext2D | null = null;
   private curCtx: CanvasRenderingContext2D | null = null;
@@ -65,6 +66,7 @@ export class TerminalHost {
   // Selection
   private selection = new Selection();
   private selecting = false;
+  private composing = false;
 
   // Debug overlay
   private debugOverlay = false;
@@ -99,6 +101,14 @@ export class TerminalHost {
   onResize?: (cols: number, rows: number) => void;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
+
+  private pointerTarget(): HTMLCanvasElement {
+    return this.cursorCanvas ?? this.textCanvas;
+  }
+
+  private keyboardTarget(): HTMLTextAreaElement | HTMLCanvasElement {
+    return this.inputSink ?? this.pointerTarget();
+  }
 
   constructor(textCanvas: HTMLCanvasElement, options: TerminalOptions = {}) {
     this.textCanvas = textCanvas;
@@ -152,17 +162,20 @@ export class TerminalHost {
     // Create overlay canvases (selection + cursor)
     this.createOverlayCanvases();
 
-    // Input events on the top-most canvas (or text canvas if overlays not created)
-    const inputTarget = this.cursorCanvas ?? this.textCanvas;
-    inputTarget.addEventListener("keydown", this.handleKeyDown);
-    inputTarget.addEventListener("paste", this.handlePaste);
-    inputTarget.addEventListener("mousedown", this.handleMouseDown);
-    inputTarget.addEventListener("mouseup", this.handleMouseUp);
-    inputTarget.addEventListener("mousemove", this.handleMouseMove);
-    inputTarget.addEventListener("wheel", this.handleWheel, { passive: false });
-    inputTarget.addEventListener("contextmenu", this.handleContextMenu);
-    inputTarget.addEventListener("focus", this.handleFocus);
-    inputTarget.addEventListener("blur", this.handleBlur);
+    const pointerTarget = this.pointerTarget();
+    const keyboardTarget = this.keyboardTarget();
+    keyboardTarget.addEventListener("keydown", this.handleKeyDown);
+    keyboardTarget.addEventListener("paste", this.handlePaste);
+    keyboardTarget.addEventListener("focus", this.handleFocus);
+    keyboardTarget.addEventListener("blur", this.handleBlur);
+    keyboardTarget.addEventListener("input", this.handleTextInput as EventListener);
+    keyboardTarget.addEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.addEventListener("compositionend", this.handleCompositionEnd as EventListener);
+    pointerTarget.addEventListener("mousedown", this.handleMouseDown);
+    pointerTarget.addEventListener("mouseup", this.handleMouseUp);
+    pointerTarget.addEventListener("mousemove", this.handleMouseMove);
+    pointerTarget.addEventListener("wheel", this.handleWheel, { passive: false });
+    pointerTarget.addEventListener("contextmenu", this.handleContextMenu);
 
     if (this.cursorBlink) {
       this.startBlink();
@@ -192,6 +205,20 @@ export class TerminalHost {
     container.appendChild(this.cursorCanvas);
     this.curCtx = this.cursorCanvas.getContext("2d", { alpha: true })!;
 
+    // A hidden textarea gives the terminal a real text-input surface so IME,
+    // dictation, and other assistive input tools can commit composed text.
+    this.inputSink = document.createElement("textarea");
+    this.inputSink.rows = 1;
+    this.inputSink.spellcheck = false;
+    this.inputSink.autocomplete = "off";
+    this.inputSink.autocorrect = "off";
+    this.inputSink.autocapitalize = "off";
+    this.inputSink.setAttribute("aria-hidden", "true");
+    this.inputSink.style.cssText =
+      "position:absolute;width:1px;height:1px;opacity:0;resize:none;overflow:hidden;border:0;padding:0;margin:0;background:transparent;color:transparent;outline:none;pointer-events:none;";
+    container.appendChild(this.inputSink);
+    this.resetInputSink();
+
     this.resizeOverlayCanvases();
   }
 
@@ -208,6 +235,7 @@ export class TerminalHost {
     }
     if (this.selCtx) this.selCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.curCtx) this.curCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.updateInputSinkPosition();
   }
 
   get gridSize(): { cols: number; rows: number } {
@@ -274,7 +302,11 @@ export class TerminalHost {
   }
 
   focus() {
-    (this.cursorCanvas ?? this.textCanvas).focus();
+    const target = this.keyboardTarget();
+    target.focus();
+    if (target instanceof HTMLTextAreaElement) {
+      target.setSelectionRange(target.value.length, target.value.length);
+    }
   }
 
   zoom(delta: number) {
@@ -290,16 +322,20 @@ export class TerminalHost {
   }
 
   dispose() {
-    const inputTarget = this.cursorCanvas ?? this.textCanvas;
-    inputTarget.removeEventListener("keydown", this.handleKeyDown);
-    inputTarget.removeEventListener("paste", this.handlePaste);
-    inputTarget.removeEventListener("mousedown", this.handleMouseDown);
-    inputTarget.removeEventListener("mouseup", this.handleMouseUp);
-    inputTarget.removeEventListener("mousemove", this.handleMouseMove);
-    inputTarget.removeEventListener("wheel", this.handleWheel);
-    inputTarget.removeEventListener("contextmenu", this.handleContextMenu);
-    inputTarget.removeEventListener("focus", this.handleFocus);
-    inputTarget.removeEventListener("blur", this.handleBlur);
+    const pointerTarget = this.pointerTarget();
+    const keyboardTarget = this.keyboardTarget();
+    keyboardTarget.removeEventListener("keydown", this.handleKeyDown);
+    keyboardTarget.removeEventListener("paste", this.handlePaste);
+    keyboardTarget.removeEventListener("focus", this.handleFocus);
+    keyboardTarget.removeEventListener("blur", this.handleBlur);
+    keyboardTarget.removeEventListener("input", this.handleTextInput as EventListener);
+    keyboardTarget.removeEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.removeEventListener("compositionend", this.handleCompositionEnd as EventListener);
+    pointerTarget.removeEventListener("mousedown", this.handleMouseDown);
+    pointerTarget.removeEventListener("mouseup", this.handleMouseUp);
+    pointerTarget.removeEventListener("mousemove", this.handleMouseMove);
+    pointerTarget.removeEventListener("wheel", this.handleWheel);
+    pointerTarget.removeEventListener("contextmenu", this.handleContextMenu);
     if (this.blinkTimer !== null) clearInterval(this.blinkTimer);
     if (this.throughputTimer !== null) clearInterval(this.throughputTimer);
     if (this.searchDebounceTimer !== null) clearTimeout(this.searchDebounceTimer);
@@ -308,13 +344,51 @@ export class TerminalHost {
     this.renderer.dispose();
     this.selectionCanvas?.remove();
     this.cursorCanvas?.remove();
+    this.inputSink?.remove();
 
   }
 
   // =========================================================================
   // Keyboard
   // =========================================================================
+  private resetInputSink() {
+    if (!this.inputSink) return;
+    this.inputSink.value = "";
+    this.inputSink.setSelectionRange(0, 0);
+  }
+
+  private updateInputSinkPosition() {
+    if (!this.inputSink) return;
+    const cursor = this.core.cursor;
+    const x = cursor.visible && this.core.viewportOffset === 0
+      ? this.padding + cursor.x * this.renderer.cellWidth
+      : this.padding;
+    const y = cursor.visible && this.core.viewportOffset === 0
+      ? this.padding + cursor.y * this.renderer.cellHeight
+      : this.padding;
+
+    this.inputSink.style.left = `${Math.max(this.padding, x)}px`;
+    this.inputSink.style.top = `${Math.max(this.padding, y)}px`;
+    this.inputSink.style.height = `${Math.max(1, this.renderer.cellHeight)}px`;
+  }
+
+  private sendTextInput(text: string) {
+    if (!text) return;
+    if (this.selection.active) {
+      this.selection.clear();
+      this.scheduleOverlayDraw();
+    }
+    this.core.resetViewport();
+    this.lastKeypressTime = performance.now();
+    this.onData?.(text);
+    this.resetBlink();
+  }
+
   private handleKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || this.composing || e.key === "Process" || e.key === "Dead") {
+      return;
+    }
+
     const modes = this.core.modes;
 
     // Cmd+F: open search bar (or navigate to next match if already open)
@@ -451,8 +525,28 @@ export class TerminalHost {
     }
   };
 
+  private handleTextInput = () => {
+    if (this.composing) return;
+    const text = this.inputSink?.value ?? "";
+    if (!text) return;
+    this.sendTextInput(text);
+    this.resetInputSink();
+  };
+
+  private handleCompositionStart = () => {
+    this.composing = true;
+  };
+
+  private handleCompositionEnd = (e: CompositionEvent) => {
+    this.composing = false;
+    const text = e.data || this.inputSink?.value || "";
+    if (text) this.sendTextInput(text);
+    this.resetInputSink();
+  };
+
   private handlePaste = (e: ClipboardEvent) => {
     e.preventDefault();
+    this.resetInputSink();
     const text = e.clipboardData?.getData("text");
     if (text) this.sendPaste(text);
   };
@@ -793,6 +887,7 @@ export class TerminalHost {
     ctx.clearRect(0, 0, w, h);
 
     const cursor = this.core.cursor;
+    this.updateInputSinkPosition();
     if (!cursor.visible || !this.cursorOn || this.core.viewportOffset > 0) return;
 
     const x = cursor.x * cellWidth;

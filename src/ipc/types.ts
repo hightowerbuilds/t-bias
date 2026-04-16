@@ -107,8 +107,8 @@ export interface PromptRecord {
 
 /** Recursive pane layout — no IDs, freshly assigned on restore. */
 export type SavedPane =
-  | { type: "terminal" }
-  | { type: "file-explorer" }
+  | { type: "terminal"; cwd?: string }
+  | { type: "file-explorer"; path?: string }
   | { type: "prompt-stacker" }
   | { type: "editor"; filePath?: string }
   | { type: "split"; dir: "h" | "v"; ratio: number; a: SavedPane; b: SavedPane };

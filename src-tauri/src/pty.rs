@@ -1,4 +1,4 @@
-use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{ChildKiller, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -11,6 +11,7 @@ const READ_BUF_SIZE: usize = 65536; // 64KB
 struct PaneState {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
     child_pid: Option<u32>,
 }
 
@@ -87,6 +88,7 @@ pub fn spawn_shell(
 
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let child_pid = child.process_id();
+    let killer = child.clone_killer();
     drop(pair.slave);
 
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -94,7 +96,15 @@ pub fn spawn_shell(
 
     {
         let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
-        panes.insert(pane_id, PaneState { writer, master: pair.master, child_pid });
+        panes.insert(
+            pane_id,
+            PaneState {
+                writer,
+                master: pair.master,
+                killer,
+                child_pid,
+            },
+        );
     }
 
     // Reader thread: streams PTY output to the frontend via pane-specific event.
@@ -161,7 +171,7 @@ pub fn resize_pty(
     Ok(())
 }
 
-/// Drop a pane's PTY, killing the child process and freeing resources.
+/// Explicitly terminate a pane's child process and then drop its PTY state.
 /// The reader thread will notice the closed master fd and exit naturally.
 #[tauri::command]
 pub fn close_pane(
@@ -169,7 +179,11 @@ pub fn close_pane(
     pane_id: u32,
 ) -> Result<(), String> {
     let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
-    panes.remove(&pane_id);
+    if let Some(mut pane) = panes.remove(&pane_id) {
+        // Make close semantics explicit: closing a terminal pane terminates
+        // the child rather than relying on PTY drop behavior alone.
+        let _ = pane.killer.kill();
+    }
     Ok(())
 }
 

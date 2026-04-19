@@ -31,6 +31,7 @@ import {
   type AppConfig,
   type ShellRecord,
 } from "./ipc/types";
+import { destroyTerminalHost } from "./Terminal";
 import {
   closeActivePaneInWorkspace,
   closeTabInWorkspace,
@@ -241,8 +242,10 @@ const App: Component = () => {
       makeTab,
       replacementPath,
     );
-    await registry.closeShellRecords(getTerminalShellIdsForPaneIds(closingTab, terminalIds(closingTab!.panes, closingTab!.rootId)));
+    const closingPaneIds = terminalIds(closingTab!.panes, closingTab!.rootId);
+    await registry.closeShellRecords(getTerminalShellIdsForPaneIds(closingTab, closingPaneIds));
     await closeTerminalPanesForTab(closingTab);
+    closingPaneIds.forEach(destroyTerminalHost);
     setTabs(result.tabs);
     setActiveTabId(result.activeTabId);
   };
@@ -286,6 +289,7 @@ const App: Component = () => {
         invoke(CLOSE_PANE_CMD, { paneId }).catch(() => {}),
       ),
     );
+    result.closeTerminalPaneIds.forEach(destroyTerminalHost);
     setTabs(result.tabs);
     setActiveTabId(result.activeTabId);
   };
@@ -466,32 +470,32 @@ const App: Component = () => {
     if (!appReady() || !e.metaKey) return;
     const key = e.key.toLowerCase();
 
-    if (key === "t" && !e.shiftKey && !e.altKey) { e.preventDefault(); void addTab(); return; }
-    if (key === "w" && !e.shiftKey && !e.altKey) { e.preventDefault(); void closeActivePane(); return; }
-    if (key === "d" && !e.shiftKey && !e.altKey) { e.preventDefault(); splitActivePane("h"); return; }
-    if (key === "d" && e.shiftKey && !e.altKey) { e.preventDefault(); splitActivePane("v"); return; }
-    if (e.key === "Enter" && e.shiftKey && !e.altKey) { e.preventDefault(); toggleZoom(); return; }
+    if (key === "t" && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void addTab(); return; }
+    if (key === "w" && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void closeActivePane(); return; }
+    if (key === "d" && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); splitActivePane("h"); return; }
+    if (key === "d" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); splitActivePane("v"); return; }
+    if (e.key === "Enter" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); toggleZoom(); return; }
     if (e.key === "/" && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       const currentTab = tab();
       if (currentTab) toggleFlipPane(currentTab.activePaneId);
       return;
     }
-    if (key === "e" && e.shiftKey && !e.altKey) { e.preventDefault(); void addFileExplorerTab(); return; }
+    if (key === "e" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void addFileExplorerTab(); return; }
 
     const digit = parseInt(e.key, 10);
     if (!Number.isNaN(digit) && digit >= 1 && digit <= 9 && !e.shiftKey && !e.altKey) {
-      if (digit - 1 < tabs.length) { e.preventDefault(); setActiveTabId(tabs[digit - 1].id); }
+      if (digit - 1 < tabs.length) { e.preventDefault(); e.stopPropagation(); setActiveTabId(tabs[digit - 1].id); }
       return;
     }
     if (e.code === "BracketLeft" && e.shiftKey && !e.altKey) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       const idx = tabs.findIndex((ct) => ct.id === activeTabId());
       if (idx > 0) setActiveTabId(tabs[idx - 1].id);
       return;
     }
     if (e.code === "BracketRight" && e.shiftKey && !e.altKey) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       const idx = tabs.findIndex((ct) => ct.id === activeTabId());
       if (idx >= 0 && idx < tabs.length - 1) setActiveTabId(tabs[idx + 1].id);
       return;
@@ -501,7 +505,7 @@ const App: Component = () => {
         ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
       };
       const dir = dirs[e.key];
-      if (dir) { e.preventDefault(); navigatePane(dir); }
+      if (dir) { e.preventDefault(); e.stopPropagation(); navigatePane(dir); }
     }
   };
 

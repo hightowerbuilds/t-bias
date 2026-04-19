@@ -18,8 +18,10 @@ Progress already landed in code:
 - before-unload and explicit session save paths now flush immediately
 - terminal input now has a real text-input sink with composition handling
 - session serialization / restore now has direct round-trip tests
+- race condition between pane close, child exit, and late PTY output events resolved (2026-04-19)
+- TerminalHost guards against post-dispose writes and rAF callbacks (2026-04-19)
 
-This roadmap is still active. The early foundations moved forward, but the manual verification, product-contract, and broader app-level coverage work are still open.
+This roadmap is still active. Phase 1.2 (backend ownership) is complete. Manual verification (1.3) has a QA checklist ready. Product-contract and broader app-level coverage work are still open.
 
 ---
 
@@ -49,17 +51,21 @@ Make pane, tab, and app close behavior explicit and deterministic.
 - [x] Add an explicit kill/terminate path for pane close
 - [x] Distinguish between graceful PTY hangup and forced termination
 - [x] Ensure child cleanup does not rely on implicit drop semantics
-- [ ] Handle races between pane close, child exit, and late PTY output events
+- [x] Handle races between pane close, child exit, and late PTY output events
 
 Note: PaneState stores a real `ChildKiller` handle (not just a PID). The termination path sends SIGHUP (graceful hangup) first, then SIGTERM, then SIGKILL (forced). `RunEvent::Exit` guarantees cleanup on app quit via `PtyState::close_all()`.
 
+Note (2026-04-19): PTY lifecycle is now managed exclusively by App.tsx (doCloseActivePane / closeTerminalPanesForTab), not by Terminal.tsx onCleanup. This prevents tree restructuring (splits) from killing PTYs. `spawn_shell` is idempotent — returns early if a PTY already exists for the pane_id.
+
 ### 1.3 Verify lifecycle behavior
+
+QA checklist written: `lifecycle-qa-checklist.md` (12 tests covering all scenarios below).
 
 - [ ] Test foreground shells on close
 - [ ] Test long-running child processes on close
 - [ ] Test nested tools like `tmux`, `vim`, `less`, and agent CLIs
 - [ ] Test tab close vs pane close vs app quit behavior
-- [ ] Add clear manual QA notes for expected outcomes
+- [x] Add clear manual QA notes for expected outcomes
 
 **Exit criteria:** a user can predict exactly what happens to their process tree when UI surfaces close.
 

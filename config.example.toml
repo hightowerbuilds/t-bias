@@ -22,9 +22,11 @@ style = "block"
 # Whether the cursor blinks
 blink = true
 
-[session]
-# When to restore the previous tab/pane layout on launch: "always", "never", or "ask"
+[shells]
+# When to restore persisted shells on launch: "always", "never", or "ask"
 restore = "ask"
+# Whether new shells should stay in the shell registry as restorable entries after quitting the app
+persist_on_quit = false
 
 [theme]
 background = "#1e1e1e"

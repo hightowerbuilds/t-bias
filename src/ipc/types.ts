@@ -71,8 +71,9 @@ export interface ConfigCursor {
   blink: boolean;
 }
 
-export interface ConfigSession {
+export interface ConfigShells {
   restore: "always" | "never" | "ask";
+  persist_on_quit: boolean;
 }
 
 export interface AppConfig {
@@ -82,7 +83,7 @@ export interface AppConfig {
   shell: string;
   padding: number;
   theme: ConfigTheme;
-  session: ConfigSession;
+  shells: ConfigShells;
 }
 
 // ========================== Filesystem ==========================
@@ -95,12 +96,39 @@ export interface DirEntry {
   modified: number | null;
 }
 
+export interface ResolvedDirectory {
+  requested_path: string;
+  resolved_path: string;
+  exact: boolean;
+}
+
 // ========================== Prompt Stacker ==========================
 
 export interface PromptRecord {
   id: string;
   text: string;
   created_at: number;
+}
+
+export interface PromptStackerState {
+  prompts: PromptRecord[];
+  queue: string[];
+}
+
+// ========================== Shell Registry ==========================
+
+export type ShellRecordStatus = "active" | "detached" | "closed" | "crashed";
+
+export interface ShellRecord {
+  id: string;
+  title: string;
+  created_at: number;
+  last_attached_at: number;
+  last_known_cwd?: string | null;
+  shell_path?: string | null;
+  status: ShellRecordStatus;
+  persist_on_quit: boolean;
+  closed_at?: number | null;
 }
 
 // ========================== Session (layout persistence) ==========================
@@ -140,7 +168,17 @@ export const LOAD_NAMED_SESSION_CMD   = "load_named_session"  as const;
 export const LIST_NAMED_SESSIONS_CMD  = "list_named_sessions" as const;
 export const DELETE_NAMED_SESSION_CMD = "delete_named_session" as const;
 export const LIST_PROMPTS_CMD         = "list_prompts"         as const;
+export const GET_PROMPT_STACKER_STATE_CMD = "get_prompt_stacker_state" as const;
 export const SAVE_PROMPT_CMD          = "save_prompt"          as const;
+export const SET_PROMPT_QUEUE_CMD     = "set_prompt_queue"     as const;
+export const PREPARE_SHELL_REGISTRY_FOR_LAUNCH_CMD = "prepare_shell_registry_for_launch" as const;
+export const LIST_SHELL_RECORDS_CMD   = "list_shell_records"   as const;
+export const CREATE_SHELL_RECORD_CMD  = "create_shell_record"  as const;
+export const ATTACH_SHELL_RECORD_CMD  = "attach_shell_record"  as const;
+export const UPDATE_SHELL_RECORD_CMD  = "update_shell_record"  as const;
+export const CLOSE_SHELL_RECORD_CMD   = "close_shell_record"   as const;
+export const SET_SHELL_PERSIST_ON_QUIT_CMD = "set_shell_persist_on_quit" as const;
+export const PREPARE_SHELL_REGISTRY_FOR_SHUTDOWN_CMD = "prepare_shell_registry_for_shutdown" as const;
 
 // Filesystem
 export const READ_DIR_CMD             = "read_dir"             as const;
@@ -150,5 +188,6 @@ export const MOVE_ENTRY_CMD           = "move_entry"           as const;
 export const CREATE_DIR_CMD           = "create_dir"           as const;
 export const DELETE_ENTRY_CMD         = "delete_entry"         as const;
 export const GET_HOME_DIR_CMD         = "get_home_dir"         as const;
+export const RESOLVE_EXISTING_DIR_CMD = "resolve_existing_dir" as const;
 export const GET_PANE_CWD_CMD        = "get_pane_cwd"          as const;
 export const GET_PANE_FOREGROUND_PROCESS_NAME_CMD = "get_pane_foreground_process_name" as const;

@@ -66,20 +66,29 @@ impl Default for ThemeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionConfig {
+pub struct ShellsConfig {
     /// "always" | "never" | "ask"
     #[serde(default = "default_restore_mode")]
     pub restore: String,
+    #[serde(default = "default_persist_on_quit")]
+    pub persist_on_quit: bool,
 }
 
-impl Default for SessionConfig {
+impl Default for ShellsConfig {
     fn default() -> Self {
-        Self { restore: default_restore_mode() }
+        Self {
+            restore: default_restore_mode(),
+            persist_on_quit: default_persist_on_quit(),
+        }
     }
 }
 
 fn default_restore_mode() -> String {
     "ask".to_string()
+}
+
+fn default_persist_on_quit() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +106,7 @@ pub struct Config {
     #[serde(default)]
     pub theme: ThemeConfig,
     #[serde(default)]
-    pub session: SessionConfig,
+    pub shells: ShellsConfig,
 }
 
 impl Default for Config {
@@ -109,7 +118,7 @@ impl Default for Config {
             shell: default_shell(),
             padding: default_padding(),
             theme: ThemeConfig::default(),
-            session: SessionConfig::default(),
+            shells: ShellsConfig::default(),
         }
     }
 }

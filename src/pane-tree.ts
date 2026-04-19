@@ -9,6 +9,7 @@ export interface TerminalPane {
   id: number;
   flipped?: boolean;
   cwd?: string;
+  shellId?: string;
 }
 
 export interface FileExplorerPane {

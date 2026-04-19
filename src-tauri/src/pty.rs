@@ -2,7 +2,8 @@ use portable_pty::{ChildKiller, CommandBuilder, MasterPty, NativePtySystem, PtyS
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -14,6 +15,10 @@ struct PaneState {
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     child_pid: Option<u32>,
+    /// Shared flag that signals the reader thread to stop emitting events.
+    /// Set to `true` in close_pane before teardown so late PTY output is
+    /// silently discarded rather than delivered to a dismounting frontend.
+    closed: Arc<AtomicBool>,
 }
 
 pub struct PtyState {
@@ -37,6 +42,7 @@ impl PtyState {
         let pane_ids: Vec<u32> = panes.keys().copied().collect();
         for pane_id in pane_ids {
             if let Some(mut pane) = panes.remove(&pane_id) {
+                pane.closed.store(true, Ordering::Release);
                 let foreground_pgid = pane.master.process_group_leader();
                 let shell_pgid = pane
                     .child_pid
@@ -68,6 +74,16 @@ pub fn spawn_shell(
     shell: Option<String>,
     cwd: Option<String>,
 ) -> Result<(), String> {
+    // If a PTY already exists for this pane (e.g. component remounted after a
+    // tree restructure like a split), skip spawning — the reader thread and
+    // child wait thread are still running.
+    {
+        let panes = state.panes.lock().map_err(|e| e.to_string())?;
+        if panes.contains_key(&pane_id) {
+            return Ok(());
+        }
+    }
+
     let pty_system = NativePtySystem::default();
 
     let pair = pty_system
@@ -125,6 +141,8 @@ pub fn spawn_shell(
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
 
+    let closed = Arc::new(AtomicBool::new(false));
+
     {
         let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
         panes.insert(
@@ -134,19 +152,29 @@ pub fn spawn_shell(
                 master: pair.master,
                 killer,
                 child_pid,
+                closed: Arc::clone(&closed),
             },
         );
     }
 
     // Reader thread: streams PTY output to the frontend via pane-specific event.
+    // Checks the `closed` flag each iteration so it stops emitting events once
+    // close_pane signals shutdown — preventing late output from reaching a
+    // dismounting frontend component.
     let app_clone = app.clone();
     let out_event = format!("pty-output-{}", pane_id);
     std::thread::spawn(move || {
         let mut buf = vec![0u8; READ_BUF_SIZE];
         loop {
+            if closed.load(Ordering::Acquire) {
+                break;
+            }
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    if closed.load(Ordering::Acquire) {
+                        break;
+                    }
                     let text = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = app_clone.emit(&out_event, text);
                 }
@@ -209,8 +237,22 @@ pub fn close_pane(
     state: tauri::State<'_, PtyState>,
     pane_id: u32,
 ) -> Result<(), String> {
-    let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
-    if let Some(mut pane) = panes.remove(&pane_id) {
+    // Extract the pane from the map while holding the lock, then release
+    // the lock before signalling / sleeping. This prevents the 60ms
+    // SIGKILL grace period from blocking write_to_pty / resize_pty calls
+    // for other panes — critical under rapid-output scenarios like `yes`.
+    let pane = {
+        let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
+        panes.remove(&pane_id)
+    };
+
+    if let Some(mut pane) = pane {
+        // Signal the reader thread to stop emitting events *before* we start
+        // tearing down the process tree. This closes the race where a late
+        // pty-output event reaches a frontend component that is already
+        // unmounting.
+        pane.closed.store(true, Ordering::Release);
+
         let foreground_pgid = pane.master.process_group_leader();
         let shell_pgid = pane
             .child_pid

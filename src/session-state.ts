@@ -1,19 +1,8 @@
 import { leafIds, type EditorPane, type PaneMap, type SplitPane } from "./pane-tree";
 import type { SavedPane, SavedTab } from "./ipc/types";
+import type { WorkspaceTabState } from "./workspace-state";
 
-export interface SessionTabState {
-  id: number;
-  title: string;
-  hasActivity: boolean;
-  returnTabId?: number;
-  rootId: number;
-  activePaneId: number;
-  panes: PaneMap;
-  paneTitles: Record<number, string>;
-  paneProcessTitles: Record<number, string>;
-  paneCwds: Record<number, string>;
-  zoomed: boolean;
-}
+export type SessionTabState = WorkspaceTabState;
 
 export function tabToSavedTab(t: SessionTabState): SavedTab {
   function serializePane(id: number): SavedPane {

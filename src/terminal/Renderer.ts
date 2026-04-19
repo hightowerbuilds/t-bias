@@ -166,6 +166,16 @@ export class CanvasRenderer implements IRenderer {
     this.forceFullDraw = true;
   }
 
+  /** Switch to a new canvas element, preserving the glyph atlas and metrics. */
+  reattach(canvas: HTMLCanvasElement) {
+    this.unwatchDpr();
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d", { alpha: false })!;
+    this.dpr = window.devicePixelRatio || 1;
+    this.forceFullDraw = true;
+    this.watchDpr();
+  }
+
   dispose() {
     this.unwatchDpr();
   }

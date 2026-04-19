@@ -13,6 +13,8 @@ import {
   CREATE_DIR_CMD,
   DELETE_ENTRY_CMD,
   GET_HOME_DIR_CMD,
+  RESOLVE_EXISTING_DIR_CMD,
+  type ResolvedDirectory,
   type AppConfig,
 } from "./ipc/types";
 
@@ -72,6 +74,7 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
   const [renameValue, setRenameValue] = createSignal("");
   const [newItemMode, setNewItemMode] = createSignal<{ parentPath: string; type: "file" | "dir" } | null>(null);
   const [newItemName, setNewItemName] = createSignal("");
+  const [restoreNotice, setRestoreNotice] = createSignal<string | null>(null);
 
   const updateRootPath = (path: string) => {
     setRootPath(path);
@@ -96,7 +99,16 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
   // Initialize
   onMount(async () => {
     try {
-      const startPath = props.initialPath || (await invoke(GET_HOME_DIR_CMD)) as string;
+      let startPath = (await invoke(GET_HOME_DIR_CMD)) as string;
+      if (props.initialPath) {
+        const resolution = (await invoke(RESOLVE_EXISTING_DIR_CMD, {
+          path: props.initialPath,
+        })) as ResolvedDirectory;
+        startPath = resolution.resolved_path;
+        if (!resolution.exact && resolution.resolved_path !== props.initialPath) {
+          setRestoreNotice(`Restored to ${resolution.resolved_path} because ${props.initialPath} is no longer available.`);
+        }
+      }
       updateRootPath(startPath);
       const children = await loadDir(startPath, 0);
       setNodes(children);
@@ -105,6 +117,7 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
 
   // Navigate to path
   const navigateTo = async (path: string) => {
+    setRestoreNotice(null);
     updateRootPath(path);
     const children = await loadDir(path, 0);
     setNodes(children);
@@ -328,6 +341,21 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
           }}
         >{"\u21BB"}</button>
       </div>
+
+      <Show when={restoreNotice()}>
+        <div
+          style={{
+            padding: "6px 8px",
+            background: "#232018",
+            color: "#d8c088",
+            "border-bottom": "1px solid #3a3422",
+            "font-size": "11px",
+            "line-height": "1.5",
+          }}
+        >
+          {restoreNotice()}
+        </div>
+      </Show>
 
       {/* New item input */}
       <Show when={newItemMode()}>

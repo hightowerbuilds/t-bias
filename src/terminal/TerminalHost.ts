@@ -96,6 +96,9 @@ export class TerminalHost {
   private throughputAccum = 0;      // bytes received in current second
   private throughputTimer: number | null = null;
 
+  // Lifecycle — prevents writes and rAF callbacks after dispose()
+  private disposed = false;
+
   // Callbacks
   onData?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
@@ -251,6 +254,7 @@ export class TerminalHost {
   }
 
   write(data: string) {
+    if (this.disposed) return;
     // Buffer the data — it will be flushed to the parser before the next render.
     // This coalesces multiple rapid pty-output events into a single parser pass,
     // reducing per-call overhead and enabling the parser to process larger chunks.
@@ -321,7 +325,103 @@ export class TerminalHost {
     this.fit();
   }
 
+  /**
+   * Detach from the DOM without destroying core state (screen buffer, glyph
+   * atlas). The host can be reattached to a new canvas later. This is used
+   * when the Solid component unmounts during pane-tree restructuring (splits)
+   * but the PTY is still alive.
+   */
+  detach() {
+    this.disposed = true;
+
+    const pointerTarget = this.pointerTarget();
+    const keyboardTarget = this.keyboardTarget();
+    keyboardTarget.removeEventListener("keydown", this.handleKeyDown);
+    keyboardTarget.removeEventListener("paste", this.handlePaste);
+    keyboardTarget.removeEventListener("focus", this.handleFocus);
+    keyboardTarget.removeEventListener("blur", this.handleBlur);
+    keyboardTarget.removeEventListener("input", this.handleTextInput as EventListener);
+    keyboardTarget.removeEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.removeEventListener("compositionend", this.handleCompositionEnd as EventListener);
+    pointerTarget.removeEventListener("mousedown", this.handleMouseDown);
+    pointerTarget.removeEventListener("mouseup", this.handleMouseUp);
+    pointerTarget.removeEventListener("mousemove", this.handleMouseMove);
+    pointerTarget.removeEventListener("wheel", this.handleWheel);
+    pointerTarget.removeEventListener("contextmenu", this.handleContextMenu);
+
+    if (this.blinkTimer !== null) { clearInterval(this.blinkTimer); this.blinkTimer = null; }
+    if (this.throughputTimer !== null) { clearInterval(this.throughputTimer); this.throughputTimer = null; }
+    if (this.searchDebounceTimer !== null) { clearTimeout(this.searchDebounceTimer); this.searchDebounceTimer = null; }
+
+    this.dismissContextMenu();
+    this.searchBar?.remove();
+    this.searchBar = null;
+    this.searchInput = null;
+    this.searchCountEl = null;
+    this.debugEl?.remove();
+    this.debugEl = null;
+    this.selectionCanvas?.remove();
+    this.selectionCanvas = null;
+    this.selCtx = null;
+    this.cursorCanvas?.remove();
+    this.cursorCanvas = null;
+    this.curCtx = null;
+    this.inputSink?.remove();
+    this.inputSink = null;
+
+    this.onData = undefined;
+    this.onResize = undefined;
+    this.onTitleChange = undefined;
+    this.onCwdChange = undefined;
+  }
+
+  /**
+   * Reattach to a new canvas element after a detach. Rebuilds overlay
+   * canvases, re-registers event listeners, and triggers a full redraw
+   * using the preserved screen buffer and glyph atlas.
+   */
+  reattach(newTextCanvas: HTMLCanvasElement) {
+    this.textCanvas = newTextCanvas;
+
+    if (this.padding > 0) {
+      newTextCanvas.style.top = `${this.padding}px`;
+      newTextCanvas.style.left = `${this.padding}px`;
+      newTextCanvas.style.width = `calc(100% - ${this.padding * 2}px)`;
+      newTextCanvas.style.height = `calc(100% - ${this.padding * 2}px)`;
+    }
+
+    this.dpr = window.devicePixelRatio || 1;
+    (this.renderer as CanvasRenderer).reattach(newTextCanvas);
+
+    this.createOverlayCanvases();
+
+    const pointerTarget = this.pointerTarget();
+    const keyboardTarget = this.keyboardTarget();
+    keyboardTarget.addEventListener("keydown", this.handleKeyDown);
+    keyboardTarget.addEventListener("paste", this.handlePaste);
+    keyboardTarget.addEventListener("focus", this.handleFocus);
+    keyboardTarget.addEventListener("blur", this.handleBlur);
+    keyboardTarget.addEventListener("input", this.handleTextInput as EventListener);
+    keyboardTarget.addEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.addEventListener("compositionend", this.handleCompositionEnd as EventListener);
+    pointerTarget.addEventListener("mousedown", this.handleMouseDown);
+    pointerTarget.addEventListener("mouseup", this.handleMouseUp);
+    pointerTarget.addEventListener("mousemove", this.handleMouseMove);
+    pointerTarget.addEventListener("wheel", this.handleWheel, { passive: false });
+    pointerTarget.addEventListener("contextmenu", this.handleContextMenu);
+
+    this.disposed = false;
+
+    if (this.cursorBlink) this.startBlink();
+    this.startThroughputTimer();
+
+    this.fit();
+    this.scheduleTextDraw();
+    this.scheduleOverlayDraw();
+  }
+
   dispose() {
+    this.disposed = true;
     const pointerTarget = this.pointerTarget();
     const keyboardTarget = this.keyboardTarget();
     keyboardTarget.removeEventListener("keydown", this.handleKeyDown);
@@ -341,11 +441,18 @@ export class TerminalHost {
     if (this.searchDebounceTimer !== null) clearTimeout(this.searchDebounceTimer);
     this.searchBar?.remove();
     this.dismissContextMenu();
+    // Clear write buffer and null out callbacks to prevent stale closures
+    // from accessing disposed state if they survive past this point.
+    this.writeBuf.length = 0;
+    this.writeBufBytes = 0;
+    this.onData = undefined;
+    this.onResize = undefined;
+    this.onTitleChange = undefined;
+    this.onCwdChange = undefined;
     this.renderer.dispose();
     this.selectionCanvas?.remove();
     this.cursorCanvas?.remove();
     this.inputSink?.remove();
-
   }
 
   // =========================================================================
@@ -426,7 +533,7 @@ export class TerminalHost {
     if (e.metaKey && e.key === "v") {
       e.preventDefault();
       this.readClipboardText().then(text => {
-        if (text) this.sendPaste(text);
+        if (text && !this.disposed) this.sendPaste(text);
       }).catch(() => { /* clipboard unavailable — ignore */ });
       return;
     }
@@ -737,10 +844,12 @@ export class TerminalHost {
   // =========================================================================
 
   private scheduleTextDraw() {
+    if (this.disposed) return;
     if (!this.textDrawQueued) {
       this.textDrawQueued = true;
       requestAnimationFrame(() => {
         this.textDrawQueued = false;
+        if (this.disposed) return;
         this.flushWriteBuffer();
         this.writesSinceLastFrame = 0;
         this.bytesSinceLastFrame = 0;
@@ -760,10 +869,12 @@ export class TerminalHost {
   // Render — Overlay Layers (cursor + selection, drawn directly by host)
   // =========================================================================
   private scheduleOverlayDraw() {
+    if (this.disposed) return;
     if (!this.overlayDrawQueued) {
       this.overlayDrawQueued = true;
       requestAnimationFrame(() => {
         this.overlayDrawQueued = false;
+        if (this.disposed) return;
         this.drawSelectionLayer();
         this.drawCursorLayer();
       });
@@ -1025,7 +1136,7 @@ export class TerminalHost {
     // Paste
     menu.appendChild(makeItem("Paste", () => {
       this.readClipboardText().then(text => {
-        if (text) this.sendPaste(text);
+        if (text && !this.disposed) this.sendPaste(text);
       }).catch(() => { /* clipboard unavailable — ignore */ });
     }));
 

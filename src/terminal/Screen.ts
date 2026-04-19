@@ -411,6 +411,7 @@ export class Screen implements ParserHandler {
 
   // ------- oscDispatch -------
   oscDispatch(data: string) {
+    console.log("[t-bias DEBUG] oscDispatch:", data);
     const semi = data.indexOf(";");
     if (semi < 0) {
       // Some OSC codes have no payload (e.g., OSC 104, OSC 112)
@@ -437,23 +438,20 @@ export class Screen implements ParserHandler {
       case 10:
         // Query/set foreground color
         if (payload === "?") {
-          // Report current foreground color in rgb:RR/GG/BB format
-          // Use theme default (#d4d4d4 → rgb:d4/d4/d4)
-          this.onResponse?.("\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\");
+          // No-op: reporting hardcoded colors can cause garbage in some shells
         }
         // Set foreground — not implemented (would need theme mutation)
         break;
       case 11:
         // Query/set background color
         if (payload === "?") {
-          // Report current background color (#1e1e1e → rgb:1e/1e/1e)
-          this.onResponse?.("\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\");
+          // No-op: reporting hardcoded colors can cause garbage in some shells
         }
         break;
       case 12:
         // Query/set cursor color
         if (payload === "?") {
-          this.onResponse?.("\x1b]12;rgb:d4d4/d4d4/d4d4\x1b\\");
+          // No-op
         }
         break;
       case 52:

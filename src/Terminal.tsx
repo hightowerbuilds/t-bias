@@ -1,19 +1,51 @@
 import { onMount, onCleanup, createSignal, createEffect, type Component } from "solid-js";
 import { TerminalHost } from "./terminal/TerminalHost";
 import {
-  SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD, CLOSE_PANE_CMD,
+  SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD,
   GET_PANE_FOREGROUND_PROCESS_NAME_CMD,
+  RESOLVE_EXISTING_DIR_CMD,
+  CREATE_SHELL_RECORD_CMD,
+  ATTACH_SHELL_RECORD_CMD,
+  type ShellRecord,
+  type ResolvedDirectory,
   type AppConfig,
 } from "./ipc/types";
 
 const { invoke } = (window as any).__TAURI__.core;
 const { listen } = (window as any).__TAURI__.event;
 
+// ---------------------------------------------------------------------------
+// TerminalHost cache — preserves screen state across component remounts
+// ---------------------------------------------------------------------------
+// When the pane tree restructures (e.g. splits), Solid's Switch/Match tears
+// down the old TerminalView and mounts a new one for the same pane ID. Without
+// this cache, the new component would create a fresh TerminalHost with a blank
+// screen, even though the PTY is still alive.
+//
+// On unmount the host is detached (DOM cleanup, timers stopped) but its core
+// state (screen buffer, scrollback, glyph atlas) is preserved. On remount the
+// host is reattached to the new canvas element and redrawn.
+// ---------------------------------------------------------------------------
+
+const hostCache = new Map<number, TerminalHost>();
+
+/** Permanently destroy a cached TerminalHost. Call when the PTY is closed. */
+export function destroyTerminalHost(paneId: number) {
+  const host = hostCache.get(paneId);
+  if (host) {
+    host.dispose();
+    hostCache.delete(paneId);
+  }
+}
+
 export interface TerminalViewProps {
   /** Unique pane ID — used as the PTY identifier and event-name suffix. */
   paneId: number;
   config: AppConfig;
   initialCwd?: string;
+  shellId?: string;
+  initialTitle?: string;
+  defaultPersistOnQuit?: boolean;
   /** Whether this pane currently has keyboard focus. */
   isActive: boolean;
   /** Called when the shell emits an OSC title change. */
@@ -24,6 +56,10 @@ export interface TerminalViewProps {
   onActivity?: () => void;
   /** Called when the shell reports a working directory change (OSC 7). */
   onCwdChange?: (cwd: string) => void;
+  /** Called when a durable shell record is created or reattached. */
+  onShellRecordReady?: (record: ShellRecord) => void;
+  /** Called when the PTY process exits. */
+  onExit?: () => void;
 }
 
 const TerminalView: Component<TerminalViewProps> = (props) => {
@@ -35,28 +71,36 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
   onMount(async () => {
     const config = props.config;
 
-    terminal = new TerminalHost(textCanvasRef, {
-      fontSize: config.font.size,
-      fontFamily: config.font.family,
-      scrollbackLimit: config.scrollback_limit,
-      padding: config.padding,
-      cursorStyle: config.cursor.style,
-      cursorBlink: config.cursor.blink,
-      theme: {
-        background: config.theme.background,
-        foreground: config.theme.foreground,
-        cursor: config.theme.cursor,
-        selectionBg: config.theme.selection_bg,
-        ansi: config.theme.ansi,
-      },
-    });
+    // Check for a cached host from a previous mount (e.g. after a split).
+    const cached = hostCache.get(props.paneId);
+    if (cached) {
+      terminal = cached;
+      terminal.reattach(textCanvasRef);
+    } else {
+      terminal = new TerminalHost(textCanvasRef, {
+        fontSize: config.font.size,
+        fontFamily: config.font.family,
+        scrollbackLimit: config.scrollback_limit,
+        padding: config.padding,
+        cursorStyle: config.cursor.style,
+        cursorBlink: config.cursor.blink,
+        theme: {
+          background: config.theme.background,
+          foreground: config.theme.foreground,
+          cursor: config.theme.cursor,
+          selectionBg: config.theme.selection_bg,
+          ansi: config.theme.ansi,
+        },
+      });
+      hostCache.set(props.paneId, terminal);
+    }
 
     // Signal that the terminal object exists so focus/resize can fire.
     setTerminalReady(true);
 
-    const { cols, rows } = terminal.gridSize;
-
+    // Always (re-)wire callbacks — they reference props from this mount cycle.
     terminal.onData = (data) => {
+      console.log("[t-bias DEBUG] write to PTY:", data);
       invoke(WRITE_TO_PTY_CMD, { paneId: props.paneId, data });
     };
 
@@ -72,6 +116,11 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       props.onCwdChange?.(cwd);
     };
 
+    terminal.onResize = (cols, rows) => {
+      invoke(RESIZE_PTY_CMD, { paneId: props.paneId, cols, rows });
+    };
+
+    // PTY event listeners — registered per mount cycle.
     const unlistenOutput = await listen(
       `pty-output-${props.paneId}`,
       (event: any) => {
@@ -84,19 +133,51 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
 
     const unlistenExit = await listen(`pty-exit-${props.paneId}`, () => {
       terminal!.write("\r\n[Process exited]\r\n");
+      props.onExit?.();
     });
 
-    const shell = config.shell || undefined;
-    try {
-      await invoke(SPAWN_SHELL_CMD, {
-        paneId: props.paneId,
-        cols,
-        rows,
-        shell,
-        cwd: props.initialCwd,
-      });
-    } catch (err) {
-      terminal!.write(`\r\n\x1b[31mFailed to spawn shell: ${err}\x1b[0m\r\n`);
+    // Only spawn a shell if this is a fresh host (not a reattach).
+    if (!cached) {
+      const shell = config.shell || undefined;
+      const { cols, rows } = terminal.gridSize;
+      try {
+        let cwd = props.initialCwd;
+        if (cwd) {
+          const resolution = (await invoke(RESOLVE_EXISTING_DIR_CMD, {
+            path: cwd,
+          })) as ResolvedDirectory;
+          cwd = resolution.resolved_path;
+          if (cwd !== props.initialCwd) {
+            props.onCwdChange?.(cwd);
+          }
+        }
+        try {
+          const shellRecord = props.shellId
+            ? (await invoke(ATTACH_SHELL_RECORD_CMD, {
+                shellId: props.shellId,
+                cwd,
+                title: props.initialTitle,
+              })) as ShellRecord
+            : (await invoke(CREATE_SHELL_RECORD_CMD, {
+                cwd,
+                shell,
+                title: props.initialTitle,
+                persistOnQuit: props.defaultPersistOnQuit,
+              })) as ShellRecord;
+          props.onShellRecordReady?.(shellRecord);
+        } catch {
+          // If shell logging fails, keep the terminal usable.
+        }
+        await invoke(SPAWN_SHELL_CMD, {
+          paneId: props.paneId,
+          cols,
+          rows,
+          shell,
+          cwd,
+        });
+      } catch (err) {
+        terminal!.write(`\r\n\x1b[31mFailed to spawn shell: ${err}\x1b[0m\r\n`);
+      }
     }
 
     let lastProcessTitle: string | null | undefined;
@@ -120,10 +201,6 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       void pollForegroundProcessTitle();
     }, 1200);
 
-    terminal.onResize = (cols, rows) => {
-      invoke(RESIZE_PTY_CMD, { paneId: props.paneId, cols, rows });
-    };
-
     // ResizeObserver keeps each pane's grid in sync with its container size.
     // This covers both window resizes and pane-divider drags without needing
     // a global window.resize handler.
@@ -136,8 +213,11 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       unlistenOutput();
       unlistenExit();
       if (processTitlePoll !== undefined) window.clearInterval(processTitlePoll);
-      terminal?.dispose();
-      invoke(CLOSE_PANE_CMD, { paneId: props.paneId }).catch(() => {});
+      // Detach (not dispose) — the host stays in hostCache so it can be
+      // reattached if this pane remounts after a tree restructure.
+      // Permanent disposal happens via destroyTerminalHost() when the PTY
+      // is actually closed by App.tsx.
+      terminal?.detach();
     });
   });
 

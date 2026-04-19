@@ -135,7 +135,7 @@ export interface ShellRecord {
 
 /** Recursive pane layout — no IDs, freshly assigned on restore. */
 export type SavedPane =
-  | { type: "terminal"; cwd?: string }
+  | { type: "terminal"; cwd?: string; shellId?: string }
   | { type: "file-explorer"; path?: string }
   | { type: "prompt-stacker" }
   | { type: "editor"; filePath?: string }

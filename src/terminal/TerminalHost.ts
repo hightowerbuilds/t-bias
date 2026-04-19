@@ -67,6 +67,7 @@ export class TerminalHost {
   private selection = new Selection();
   private selecting = false;
   private composing = false;
+  private compositionText = "";
 
   // Debug overlay
   private debugOverlay = false;
@@ -173,6 +174,7 @@ export class TerminalHost {
     keyboardTarget.addEventListener("blur", this.handleBlur);
     keyboardTarget.addEventListener("input", this.handleTextInput as EventListener);
     keyboardTarget.addEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.addEventListener("compositionupdate", this.handleCompositionUpdate as EventListener);
     keyboardTarget.addEventListener("compositionend", this.handleCompositionEnd as EventListener);
     pointerTarget.addEventListener("mousedown", this.handleMouseDown);
     pointerTarget.addEventListener("mouseup", this.handleMouseUp);
@@ -210,6 +212,8 @@ export class TerminalHost {
 
     // A hidden textarea gives the terminal a real text-input surface so IME,
     // dictation, and other assistive input tools can commit composed text.
+    // It must have real font metrics so IME candidate windows position and
+    // size themselves correctly relative to the terminal cursor.
     this.inputSink = document.createElement("textarea");
     this.inputSink.rows = 1;
     this.inputSink.spellcheck = false;
@@ -218,7 +222,11 @@ export class TerminalHost {
     this.inputSink.autocapitalize = "off";
     this.inputSink.setAttribute("aria-hidden", "true");
     this.inputSink.style.cssText =
-      "position:absolute;width:1px;height:1px;opacity:0;resize:none;overflow:hidden;border:0;padding:0;margin:0;background:transparent;color:transparent;outline:none;pointer-events:none;";
+      `position:absolute;width:${this.renderer.cellWidth}px;height:${this.renderer.cellHeight}px;` +
+      `font:${this.fontSize}px ${this.textCanvas.style.fontFamily || "monospace"};` +
+      "line-height:1;resize:none;overflow:hidden;border:0;padding:0;margin:0;" +
+      "background:transparent;color:transparent;caret-color:transparent;" +
+      "outline:none;pointer-events:none;opacity:0;z-index:10;";
     container.appendChild(this.inputSink);
     this.resetInputSink();
 
@@ -342,6 +350,7 @@ export class TerminalHost {
     keyboardTarget.removeEventListener("blur", this.handleBlur);
     keyboardTarget.removeEventListener("input", this.handleTextInput as EventListener);
     keyboardTarget.removeEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.removeEventListener("compositionupdate", this.handleCompositionUpdate as EventListener);
     keyboardTarget.removeEventListener("compositionend", this.handleCompositionEnd as EventListener);
     pointerTarget.removeEventListener("mousedown", this.handleMouseDown);
     pointerTarget.removeEventListener("mouseup", this.handleMouseUp);
@@ -403,6 +412,7 @@ export class TerminalHost {
     keyboardTarget.addEventListener("blur", this.handleBlur);
     keyboardTarget.addEventListener("input", this.handleTextInput as EventListener);
     keyboardTarget.addEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.addEventListener("compositionupdate", this.handleCompositionUpdate as EventListener);
     keyboardTarget.addEventListener("compositionend", this.handleCompositionEnd as EventListener);
     pointerTarget.addEventListener("mousedown", this.handleMouseDown);
     pointerTarget.addEventListener("mouseup", this.handleMouseUp);
@@ -430,6 +440,7 @@ export class TerminalHost {
     keyboardTarget.removeEventListener("blur", this.handleBlur);
     keyboardTarget.removeEventListener("input", this.handleTextInput as EventListener);
     keyboardTarget.removeEventListener("compositionstart", this.handleCompositionStart as EventListener);
+    keyboardTarget.removeEventListener("compositionupdate", this.handleCompositionUpdate as EventListener);
     keyboardTarget.removeEventListener("compositionend", this.handleCompositionEnd as EventListener);
     pointerTarget.removeEventListener("mousedown", this.handleMouseDown);
     pointerTarget.removeEventListener("mouseup", this.handleMouseUp);
@@ -476,7 +487,13 @@ export class TerminalHost {
 
     this.inputSink.style.left = `${Math.max(this.padding, x)}px`;
     this.inputSink.style.top = `${Math.max(this.padding, y)}px`;
+    this.inputSink.style.width = `${this.renderer.cellWidth}px`;
     this.inputSink.style.height = `${Math.max(1, this.renderer.cellHeight)}px`;
+
+    // During composition, make the input sink slightly visible so the OS can
+    // position the IME candidate window correctly. When not composing, keep it
+    // fully transparent so it doesn't interfere with the terminal display.
+    this.inputSink.style.opacity = this.composing ? "0.01" : "0";
   }
 
   private sendTextInput(text: string) {
@@ -642,13 +659,24 @@ export class TerminalHost {
 
   private handleCompositionStart = () => {
     this.composing = true;
+    this.compositionText = "";
+    this.updateInputSinkPosition();
+    this.scheduleOverlayDraw();
+  };
+
+  private handleCompositionUpdate = (e: CompositionEvent) => {
+    this.compositionText = e.data ?? "";
+    this.scheduleOverlayDraw();
   };
 
   private handleCompositionEnd = (e: CompositionEvent) => {
     this.composing = false;
+    this.compositionText = "";
     const text = e.data || this.inputSink?.value || "";
     if (text) this.sendTextInput(text);
     this.resetInputSink();
+    this.updateInputSinkPosition();
+    this.scheduleOverlayDraw();
   };
 
   private handlePaste = (e: ClipboardEvent) => {
@@ -1004,6 +1032,29 @@ export class TerminalHost {
     const x = cursor.x * cellWidth;
     const y = cursor.y * cellHeight;
     ctx.fillStyle = this.theme.cursor;
+
+    // Draw composition pre-edit text at the cursor position with an underline
+    // so the user sees what they're typing during IME input.
+    if (this.composing && this.compositionText) {
+      const font = `${this.fontSize}px ${this.textCanvas.style.fontFamily || "monospace"}`;
+      ctx.font = font;
+      ctx.fillStyle = this.theme.foreground;
+      ctx.globalAlpha = 1.0;
+
+      // Background behind composition text
+      const textWidth = ctx.measureText(this.compositionText).width;
+      ctx.fillStyle = this.theme.background;
+      ctx.fillRect(x, y, textWidth, cellHeight);
+
+      // Composition text — baseline approximated from font metrics
+      ctx.fillStyle = this.theme.foreground;
+      const baseline = ctx.measureText("M").actualBoundingBoxAscent ?? this.fontSize * 0.8;
+      ctx.fillText(this.compositionText, x, y + baseline);
+
+      // Underline to indicate pre-edit state
+      ctx.fillRect(x, y + cellHeight - 2, textWidth, 1);
+      return;
+    }
 
     switch (cursor.shape) {
       case "block":

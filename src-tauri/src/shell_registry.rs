@@ -73,11 +73,13 @@ fn load_shell_registry_inner() -> Result<Vec<ShellRecord>, String> {
 
 fn save_shell_registry_inner(records: &[ShellRecord]) -> Result<(), String> {
     let path = shell_registry_path().ok_or("no config directory")?;
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let mut next_records = records.to_vec();
     sort_records(&mut next_records);
-    let json = serde_json::to_string_pretty(&next_records).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    if let Err(e) = crate::persistence::atomic_write_json_pretty(&path, &next_records) {
+        log::error!("save_shell_registry failed: {e}");
+        return Err(e);
+    }
+    Ok(())
 }
 
 fn normalize_records_for_launch(records: &mut [ShellRecord]) -> bool {

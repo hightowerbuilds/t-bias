@@ -76,10 +76,12 @@ fn load_prompt_stacker_state_inner() -> Result<PromptStackerState, String> {
 
 fn save_prompt_stacker_state_inner(state: &PromptStackerState) -> Result<(), String> {
     let path = prompts_path().ok_or("no config directory")?;
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let normalized = normalize_state(state.clone());
-    let json = serde_json::to_string_pretty(&normalized).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    if let Err(e) = crate::persistence::atomic_write_json_pretty(&path, &normalized) {
+        log::error!("save_prompt_stacker_state failed: {e}");
+        return Err(e);
+    }
+    Ok(())
 }
 
 fn next_prompt_id() -> String {

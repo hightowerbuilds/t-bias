@@ -79,22 +79,26 @@ Turn session restore from layout restore into real workspace restore.
 
 - [x] Persist terminal cwd for each restorable terminal pane
 - [x] Persist file explorer root path
-- [ ] Persist editor file identity and reopen location where feasible
-- [ ] Persist active tab and active pane in a way that survives structural changes
-- [ ] Remove or migrate legacy Prompt Stacker pane compatibility once obsolete
+- [x] Persist editor file identity and reopen location where feasible
+- [x] Persist active tab and active pane in a way that survives structural changes
+- [x] Remove or migrate legacy Prompt Stacker pane compatibility once obsolete
+
+Note (2026-04-19): Full workspace layout (tabs, splits, pane types, cwds, shellIds, active tab/pane index) now auto-saves to `session.json` on quit and auto-restores on launch. Legacy prompt-stacker panes map back to terminal panes on restore. Editor filePath round-trips correctly. Shell records are linked to layout tabs via shellId for session continuity.
 
 ### 2.2 Clarify session semantics
 
-- [ ] Separate “layout restore” from “workspace restore” in naming if needed
+- [x] Separate “layout restore” from “workspace restore” in naming if needed
 - [ ] Ensure session landing UI reflects what is actually restored
-- [ ] Avoid silently changing saved pane types during restore without surfacing that behavior
+- [x] Avoid silently changing saved pane types during restore without surfacing that behavior
+
+Note (2026-04-19): Layout restore is now distinct from shell-record restore. On launch, session.json (full layout) is preferred; shell records are fallback. Legacy prompt-stacker panes restore as terminals with correct titles — no silent type confusion.
 
 ### 2.3 Harden restore behavior
 
 - [x] Handle missing paths gracefully
-- [ ] Handle deleted files and moved directories gracefully
+- [ ] Handle deleted files and moved directories gracefully (editor panes with missing files)
 - [x] Handle shells that fail to spawn at the saved cwd
-- [ ] Add migration rules for older session file formats
+- [ ] Add migration rules for older session file formats (version field in SessionData enables this)
 
 **Exit criteria:** reopening a saved session gets the user meaningfully back to where they were working, not just back to a similar shape.
 
@@ -113,10 +117,12 @@ Make auto-save durable without tying it directly to every interaction path.
 
 ### 3.2 Improve write strategy
 
-- [ ] Consider writing compact JSON rather than pretty JSON for autosave
-- [ ] Consider atomic write strategy: temp file + rename
-- [ ] Handle failed writes without silently masking durable-state problems
-- [ ] Add instrumentation or logs around session save failures
+- [x] Consider writing compact JSON rather than pretty JSON for autosave
+- [x] Consider atomic write strategy: temp file + rename
+- [x] Handle failed writes without silently masking durable-state problems
+- [x] Add instrumentation or logs around session save failures
+
+Note (2026-04-19): Added `persistence.rs` with `atomic_write`, `atomic_write_json_compact`, and `atomic_write_json_pretty` helpers. All four write paths (session, named sessions, shell registry, prompt stacker) now use atomic temp-file-then-rename writes. Auto-session uses compact JSON; user-facing files use pretty JSON. All failures are logged via `log::error!` and propagated to callers.
 
 ### 3.3 Stress the persistence model
 
@@ -137,8 +143,10 @@ Support serious text input, not just keydown-driven terminal usage.
 
 - [x] Add composition event handling (`compositionstart`, `compositionupdate`, `compositionend`)
 - [x] Add input-path handling where raw keyboard events are insufficient
-- [ ] Verify the terminal focus target can participate in text composition correctly
+- [x] Verify the terminal focus target can participate in text composition correctly
 - [x] Ensure composition text does not leak broken intermediate states into the PTY
+
+Note (2026-04-19): Input sink (hidden textarea) now has proper font metrics matching the terminal font so IME candidate windows position correctly. `compositionupdate` handler added — pre-edit text is rendered with underline at cursor position on the cursor overlay layer. Input sink becomes slightly visible (opacity 0.01) during composition so the OS can anchor the candidate window. Clears on compositionend.
 
 ### 4.2 Validate IME behavior
 

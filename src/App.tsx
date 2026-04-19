@@ -26,9 +26,12 @@ import type { SplitPane, EditorPane, TerminalPane } from "./pane-tree";
 import {
   CLOSE_PANE_CMD,
   GET_CONFIG_CMD,
+  SAVE_SESSION_CMD,
+  LOAD_SESSION_CMD,
   PREPARE_SHELL_REGISTRY_FOR_LAUNCH_CMD,
   PREPARE_SHELL_REGISTRY_FOR_SHUTDOWN_CMD,
   type AppConfig,
+  type SessionData,
   type ShellRecord,
 } from "./ipc/types";
 import { destroyTerminalHost } from "./Terminal";
@@ -43,6 +46,10 @@ import {
   type ShellTabOptions,
   type WorkspaceTabState,
 } from "./workspace-state";
+import {
+  workspaceToSessionData,
+  sessionDataToWorkspace,
+} from "./session-state";
 
 const { invoke } = (window as any).__TAURI__.core;
 
@@ -100,12 +107,20 @@ const App: Component = () => {
     setPromptStackerOpen(false);
   };
 
-  const restorePersistedShells = () => {
-    const restorable = registry.shellRecords().filter(isRestorableShell);
-    if (restorable.length > 0) {
-      setWorkspaceTabs(makeTabsFromShellRecords(restorable));
-    } else if (!tabs.length) {
-      setWorkspaceTabs([makeTab()]);
+  const restorePersistedShells = async () => {
+    // Prefer session layout over flat shell records.
+    const savedSession = (await invoke(LOAD_SESSION_CMD).catch(() => null)) as SessionData | null;
+    if (savedSession?.tabs?.length) {
+      const { tabs: restoredTabs, activeTabIndex } = sessionDataToWorkspace(savedSession, newId);
+      setTabs(restoredTabs);
+      setActiveTabId(restoredTabs[activeTabIndex]?.id ?? restoredTabs[0]?.id ?? 0);
+    } else {
+      const restorable = registry.shellRecords().filter(isRestorableShell);
+      if (restorable.length > 0) {
+        setWorkspaceTabs(makeTabsFromShellRecords(restorable));
+      } else if (!tabs.length) {
+        setWorkspaceTabs([makeTab()]);
+      }
     }
     setShellLandingOpen(false);
     setPromptStackerOpen(false);
@@ -514,6 +529,10 @@ const App: Component = () => {
   // ---------------------------------------------------------------------------
 
   const shutdownShellRegistry = async () => {
+    // Save the full workspace layout so it can be restored on next launch.
+    const sessionData = workspaceToSessionData(tabs.slice(), activeTabId());
+    await invoke(SAVE_SESSION_CMD, { data: sessionData }).catch(() => {});
+
     const activeShellIds = [...new Set(
       tabs.flatMap((currentTab) =>
         Object.values(currentTab.panes)
@@ -538,9 +557,22 @@ const App: Component = () => {
 
     setConfig(cfg);
 
-    if (cfg.shells.restore === "always" && restorable.length > 0) {
-      setWorkspaceTabs(makeTabsFromShellRecords(restorable));
-    } else if (cfg.shells.restore === "ask" && restorable.length > 0) {
+    // Try to restore the full workspace layout from session.json first.
+    // Fall back to flat shell-record tabs if no layout exists.
+    const savedSession = (await invoke(LOAD_SESSION_CMD).catch(() => null)) as SessionData | null;
+    const hasLayout = savedSession?.tabs?.length != null && savedSession.tabs.length > 0;
+
+    if (cfg.shells.restore === "always") {
+      if (hasLayout) {
+        const { tabs: restoredTabs, activeTabIndex } = sessionDataToWorkspace(savedSession!, newId);
+        setTabs(restoredTabs);
+        setActiveTabId(restoredTabs[activeTabIndex]?.id ?? restoredTabs[0]?.id ?? 0);
+      } else if (restorable.length > 0) {
+        setWorkspaceTabs(makeTabsFromShellRecords(restorable));
+      } else {
+        setWorkspaceTabs([makeTab()]);
+      }
+    } else if (cfg.shells.restore === "ask" && (hasLayout || restorable.length > 0)) {
       setShellLandingOpen(true);
     } else {
       setWorkspaceTabs([makeTab()]);

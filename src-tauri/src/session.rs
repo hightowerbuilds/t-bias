@@ -5,9 +5,10 @@
 // The session file only stores layout structure (no content), so restoring
 // means spawning fresh PTYs in the same arrangement.
 //
-// Auto-session:  ~/.config/tbias/session.json
-// Named sessions: ~/.config/tbias/sessions/<name>.json
+// Auto-session:  ~/.config/tbias/session.json   (compact JSON, atomic write)
+// Named sessions: ~/.config/tbias/sessions/<name>.json (pretty JSON, atomic write)
 
+use crate::persistence::{atomic_write_json_compact, atomic_write_json_pretty};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -33,7 +34,6 @@ fn sanitize_name(name: &str) -> String {
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
         .collect();
-    // Replace spaces with underscores and strip leading/trailing junk
     s.replace(' ', "_")
         .trim_matches('_')
         .to_string()
@@ -54,9 +54,11 @@ fn named_session_path(name: &str) -> Option<PathBuf> {
 #[tauri::command]
 pub fn save_session(data: Value) -> Result<(), String> {
     let path = auto_session_path().ok_or("no config directory")?;
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    if let Err(e) = atomic_write_json_compact(&path, &data) {
+        log::error!("save_session failed: {e}");
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Returns the saved session, or null if none exists.
@@ -77,9 +79,11 @@ pub fn load_session() -> Option<Value> {
 #[tauri::command]
 pub fn save_named_session(name: String, data: Value) -> Result<(), String> {
     let path = named_session_path(&name).ok_or("invalid session name")?;
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    if let Err(e) = atomic_write_json_pretty(&path, &data) {
+        log::error!("save_named_session '{}' failed: {e}", name);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Returns the named session, or null if it doesn't exist.

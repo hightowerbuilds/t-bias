@@ -2,8 +2,10 @@ use tauri::Manager;
 
 mod config;
 mod fs_ops;
+mod persistence;
 mod pty;
 mod prompt_stacker;
+mod session;
 mod shell_registry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,6 +42,12 @@ pub fn run() {
             shell_registry::close_shell_record,
             shell_registry::set_shell_persist_on_quit,
             shell_registry::prepare_shell_registry_for_shutdown,
+            session::save_session,
+            session::load_session,
+            session::save_named_session,
+            session::load_named_session,
+            session::list_named_sessions,
+            session::delete_named_session,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

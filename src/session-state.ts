@@ -1,5 +1,5 @@
-import { leafIds, type EditorPane, type PaneMap, type SplitPane } from "./pane-tree";
-import type { SavedPane, SavedTab } from "./ipc/types";
+import { leafIds, type EditorPane, type PaneMap, type SplitPane, type TerminalPane } from "./pane-tree";
+import type { SavedPane, SavedTab, SessionData } from "./ipc/types";
 import type { WorkspaceTabState } from "./workspace-state";
 
 export type SessionTabState = WorkspaceTabState;
@@ -11,6 +11,7 @@ export function tabToSavedTab(t: SessionTabState): SavedTab {
       return {
         type: "terminal",
         cwd: t.paneCwds[id] ?? pane.cwd,
+        shellId: (pane as TerminalPane).shellId,
       };
     }
     if (pane.type === "file-explorer") {
@@ -60,7 +61,7 @@ export function savedTabToTabState(
       leafPaneIds.push(id);
       return {
         id,
-        panes: { [id]: { type: "terminal", id, cwd: node.cwd } },
+        panes: { [id]: { type: "terminal", id, cwd: node.cwd, shellId: node.shellId } },
         paneTitles: { [id]: "Shell" },
         paneCwds: node.cwd ? { [id]: node.cwd } : {},
       };
@@ -139,4 +140,32 @@ export function savedTabToTabState(
     paneCwds,
     zoomed: false,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Workspace-level serialization — wraps all tabs into a single SessionData
+// ---------------------------------------------------------------------------
+
+export function workspaceToSessionData(
+  tabs: SessionTabState[],
+  activeTabId: number,
+): SessionData {
+  const activeTabIndex = Math.max(0, tabs.findIndex((t) => t.id === activeTabId));
+  return {
+    version: 1,
+    activeTabIndex,
+    tabs: tabs.map(tabToSavedTab),
+  };
+}
+
+export function sessionDataToWorkspace(
+  data: SessionData,
+  newId: () => number,
+): { tabs: SessionTabState[]; activeTabIndex: number } {
+  const tabs = data.tabs.map((t) => savedTabToTabState(t, newId));
+  const activeTabIndex = Math.min(
+    Math.max(0, data.activeTabIndex),
+    tabs.length - 1,
+  );
+  return { tabs, activeTabIndex };
 }

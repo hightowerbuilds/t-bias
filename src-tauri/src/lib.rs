@@ -1,8 +1,10 @@
+use tauri::Manager;
+
 mod config;
 mod fs_ops;
 mod pty;
 mod prompt_stacker;
-mod session;
+mod shell_registry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,12 +18,6 @@ pub fn run() {
             pty::resize_pty,
             pty::close_pane,
             config::get_config,
-            session::save_session,
-            session::load_session,
-            session::save_named_session,
-            session::load_named_session,
-            session::list_named_sessions,
-            session::delete_named_session,
             fs_ops::read_dir,
             fs_ops::read_file,
             fs_ops::write_file,
@@ -29,10 +25,21 @@ pub fn run() {
             fs_ops::create_dir,
             fs_ops::delete_entry,
             fs_ops::get_home_dir,
+            fs_ops::resolve_existing_dir,
             pty::get_pane_cwd,
             pty::get_pane_foreground_process_name,
             prompt_stacker::list_prompts,
+            prompt_stacker::get_prompt_stacker_state,
             prompt_stacker::save_prompt,
+            prompt_stacker::set_prompt_queue,
+            shell_registry::prepare_shell_registry_for_launch,
+            shell_registry::list_shell_records,
+            shell_registry::create_shell_record,
+            shell_registry::attach_shell_record,
+            shell_registry::update_shell_record,
+            shell_registry::close_shell_record,
+            shell_registry::set_shell_persist_on_quit,
+            shell_registry::prepare_shell_registry_for_shutdown,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -73,6 +80,15 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Terminate every PTY child process before the app process exits.
+                // This is the guaranteed cleanup path — it runs regardless of how
+                // the app was closed (window X, Cmd+Q, forced quit).
+                let state = app_handle.state::<pty::PtyState>();
+                state.close_all();
+            }
+        });
 }

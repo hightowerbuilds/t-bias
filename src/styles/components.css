@@ -1,0 +1,106 @@
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.btn {
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+}
+
+.btn-destructive {
+  background: var(--error);
+  border: 1px solid var(--error-border);
+  color: #fff;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-input);
+  color: var(--text-muted);
+}
+
+.btn-pill {
+  border-radius: var(--radius-pill);
+  padding: 6px 10px;
+  font-size: 10px;
+}
+
+.btn-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Modals                                                              */
+/* ------------------------------------------------------------------ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-card {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Section labels                                                      */
+/* ------------------------------------------------------------------ */
+
+.section-label {
+  font-size: 11px;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Input fields                                                        */
+/* ------------------------------------------------------------------ */
+
+.input-field {
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Pane active border                                                  */
+/* ------------------------------------------------------------------ */
+
+.pane-active-border {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--active-border);
+  pointer-events: none;
+  z-index: 20;
+  box-sizing: border-box;
+}

@@ -2,6 +2,7 @@ import {
   createEffect,
   For,
   Show,
+  onMount,
   type Component,
 } from "solid-js";
 import {
@@ -33,7 +34,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
     });
   };
 
-  createEffect(() => {
+  onMount(() => {
     void store.ensureLoaded();
   });
 
@@ -55,6 +56,8 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
       minute: "2-digit",
     });
 
+  const canSave = () => !store.saving() && store.draft().trim();
+
   return (
     <div
       style={{
@@ -62,94 +65,66 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
         height: "100%",
         display: "flex",
         "flex-direction": "column",
-        background: isModal() ? "transparent" : props.config.theme.background,
+        background: props.config.theme.background,
         color: props.config.theme.foreground,
-        "font-family": "Menlo, Monaco, 'Courier New', monospace",
+        "font-family": "var(--font-mono)",
         "min-height": "0",
+        padding: isModal() ? "40px 60px" : "0",
+        "box-sizing": "border-box",
       }}
     >
       <div
         style={{
-          padding: isModal() ? "0 0 18px" : "18px 20px 14px",
-          "border-bottom": isModal() ? "none" : "1px solid #2a2a2a",
+          padding: isModal() ? "0 0 30px" : "18px 20px 14px",
+          "border-bottom": "1px solid var(--border)",
           "flex-shrink": "0",
+          "margin-bottom": isModal() ? "30px" : "0",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            "align-items": "center",
-            "justify-content": "space-between",
-            gap: "12px",
-            "margin-bottom": "12px",
-          }}
-        >
+        <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "12px", "margin-bottom": "12px" }}>
           <div>
-            <div style={{ "font-size": isModal() ? "18px" : "13px", color: "#d4d4d4" }}>Prompt Stacker</div>
-            <div style={{ "font-size": isModal() ? "12px" : "11px", color: "#777", "margin-top": "3px", "line-height": "1.6" }}>
+            <div style={{ "font-size": isModal() ? "24px" : "13px", color: "var(--text-primary)", "font-weight": "500" }}>Prompt Stacker</div>
+            <div style={{ "font-size": isModal() ? "13px" : "11px", color: "var(--text-sublabel)", "margin-top": "6px", "line-height": "1.6" }}>
               Capture reusable prompts, keep them organized, and return to the shell when you are done.
             </div>
           </div>
-          <div
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "10px",
-              "flex-shrink": "0",
-            }}
-          >
-            <div style={{ "font-size": "11px", color: "#666" }}>
-              {store.prompts().length} saved
+          <div style={{ display: "flex", "align-items": "center", gap: "16px", "flex-shrink": "0" }}>
+            <div style={{ display: "flex", "align-items": "center", gap: "10px", "font-size": "12px", color: "var(--text-dim)" }}>
+              <span>{store.prompts().length} saved</span>
+              <span>{store.queueIds().length} queued</span>
             </div>
             <Show when={closeAction()}>
               <button
+                class="btn btn-secondary"
                 onClick={() => void closeAction()?.()}
                 style={{
-                  background: isModal() ? "#232323" : "#1a1a1a",
-                  color: isModal() ? "#d4d4d4" : "#b8c7ea",
-                  border: isModal() ? "1px solid #444" : "1px solid #303845",
-                  "border-radius": "8px",
-                  padding: "7px 10px",
-                  "font-family": "inherit",
-                  "font-size": "11px",
-                  cursor: "pointer",
+                  padding: "10px 20px",
+                  "font-size": "13px",
+                  color: "#fff",
+                  "font-weight": "500",
+                  transition: "background 0.2s",
                 }}
               >
-                {isModal() ? "Done" : "← Shell"}
+                {isModal() ? "Close" : "← Shell"}
               </button>
             </Show>
           </div>
         </div>
       </div>
 
-      <div
-        style={{
-          flex: "1",
-          overflow: "hidden",
-          padding: isModal() ? "0" : "14px 18px 18px",
-          "box-sizing": "border-box",
+      <div style={{ flex: "1", overflow: "hidden", display: "flex", "flex-direction": "column", gap: "24px", "min-height": "0" }}>
+        <div style={{
+          background: "var(--bg-deep)",
+          border: "1px solid var(--border-subtle)",
+          "border-radius": "var(--radius-lg)",
+          padding: "20px",
           display: "flex",
           "flex-direction": "column",
-          gap: "14px",
-          "min-height": "0",
-        }}
-      >
-        <div
-          style={{
-            background: isModal() ? "#121212" : "transparent",
-            border: isModal() ? "1px solid #252525" : "none",
-            "border-radius": isModal() ? "10px" : "0",
-            padding: isModal() ? "16px" : "0",
-            display: "flex",
-            "flex-direction": "column",
-            gap: "10px",
-          }}
-        >
-          <Show when={isModal()}>
-            <div style={{ "font-size": "11px", color: "#6f6f6f", "text-transform": "uppercase", "letter-spacing": "0.08em" }}>
-              Draft Prompt
-            </div>
-          </Show>
+          gap: "12px",
+        }}>
+          <div class="section-label" style={{ "font-weight": "600", "letter-spacing": "0.1em" }}>
+            Draft Prompt
+          </div>
 
           <textarea
             ref={textareaRef}
@@ -163,48 +138,36 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
             }}
             placeholder="Write a prompt here..."
             spellcheck={false}
+            class="input-field"
             style={{
               width: "100%",
-              height: isModal() ? "180px" : "130px",
-              resize: "vertical",
-              background: "#111",
+              height: isModal() ? "160px" : "130px",
+              resize: "none",
               color: props.config.theme.foreground,
-              border: "1px solid #333",
-              "border-radius": "8px",
-              padding: "12px 13px",
+              "border-radius": "var(--radius-md)",
+              padding: "14px",
               "box-sizing": "border-box",
-              "font-family": "inherit",
-              "font-size": "12px",
+              "font-size": "13px",
               "line-height": "1.6",
-              outline: "none",
             }}
           />
 
-          <div
-            style={{
-              display: "flex",
-              "align-items": "center",
-              "justify-content": "space-between",
-              gap: "10px",
-            }}
-          >
+          <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
             <Show when={store.error()}>
-              <div style={{ color: "#f44747", "font-size": "11px" }}>{store.error()}</div>
+              <div style={{ color: "var(--error-text)", "font-size": "11px" }}>{store.error()}</div>
             </Show>
-            <div style={{ "margin-left": "auto", display: "flex", gap: "8px", "align-items": "center" }}>
-              <div style={{ "font-size": "11px", color: "#666" }}>Cmd+Enter to save</div>
+            <div style={{ "margin-left": "auto", display: "flex", gap: "12px", "align-items": "center" }}>
+              <div style={{ "font-size": "11px", color: "var(--text-dim)" }}>⌘+Enter to save</div>
               <button
+                class="btn"
                 onClick={() => void savePrompt()}
-                disabled={store.saving() || !store.draft().trim()}
+                disabled={!canSave()}
                 style={{
-                  background: store.saving() || !store.draft().trim() ? "#2a2a2a" : "#5b8aff",
-                  color: store.saving() || !store.draft().trim() ? "#666" : "#fff",
-                  border: "none",
-                  "border-radius": "8px",
-                  padding: "8px 12px",
-                  "font-family": "inherit",
-                  "font-size": "11px",
-                  cursor: store.saving() || !store.draft().trim() ? "default" : "pointer",
+                  background: canSave() ? "var(--accent)" : "var(--border)",
+                  color: canSave() ? "#fff" : "var(--text-dim)",
+                  padding: "10px 18px",
+                  cursor: canSave() ? "pointer" : "default",
+                  "font-weight": "500",
                 }}
               >
                 {store.saving() ? "Saving..." : "Save Prompt"}
@@ -213,66 +176,63 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
           </div>
         </div>
 
-        <div
-          style={{
-            flex: "1",
-            background: isModal() ? "#121212" : "transparent",
-            border: isModal() ? "1px solid #252525" : "none",
-            "border-radius": isModal() ? "10px" : "0",
-            padding: isModal() ? "16px" : "0",
-            display: "flex",
-            "flex-direction": "column",
-            gap: "12px",
-            "min-height": "0",
-          }}
-        >
-          <Show when={isModal()}>
-            <div style={{ "font-size": "11px", color: "#6f6f6f", "text-transform": "uppercase", "letter-spacing": "0.08em" }}>
-              Saved Prompts
-            </div>
-          </Show>
+        <div style={{
+          flex: "1",
+          background: "var(--bg-deep)",
+          border: "1px solid var(--border-subtle)",
+          "border-radius": "var(--radius-lg)",
+          padding: "20px",
+          display: "flex",
+          "flex-direction": "column",
+          gap: "16px",
+          "min-height": "0",
+        }}>
+          <div class="section-label" style={{ "font-weight": "600", "letter-spacing": "0.1em" }}>
+            Saved Prompts
+          </div>
 
           <Show
             when={store.prompts().length > 0}
             fallback={
-              <div
-                style={{
-                  flex: "1",
-                  display: "flex",
-                  "align-items": "center",
-                  "justify-content": "center",
-                  color: "#666",
-                  "font-size": "12px",
-                }}
-              >
+              <div style={{ flex: "1", display: "flex", "align-items": "center", "justify-content": "center", color: "var(--text-dim)", "font-size": "13px" }}>
                 {store.loading() ? "Loading prompts..." : "No saved prompts yet"}
               </div>
             }
           >
-            <div style={{ display: "flex", "flex-direction": "column", gap: "10px", overflow: "auto", "padding-right": "4px" }}>
+            <div style={{ display: "flex", "flex-direction": "column", gap: "12px", overflow: "auto", "padding-right": "8px" }}>
               <For each={store.prompts()}>
                 {(prompt) => (
-                  <div
-                    style={{
-                      background: "#151515",
-                      border: "1px solid #272727",
-                      "border-radius": "10px",
-                      padding: "12px 13px",
-                      "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
-                    }}
-                  >
-                    <div style={{ "font-size": "10px", color: "#666", "margin-bottom": "8px" }}>
-                      {formatDate(prompt.created_at)}
+                  <div style={{
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border)",
+                    "border-radius": "10px",
+                    padding: "16px",
+                    "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
+                  }}>
+                    <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "12px", "margin-bottom": "10px" }}>
+                      <div style={{ "font-size": "11px", color: "var(--text-dim)" }}>
+                        {formatDate(prompt.created_at)}
+                      </div>
+                      <button
+                        class="btn btn-pill"
+                        onClick={() => void store.toggleQueued(prompt.id)}
+                        disabled={store.syncingQueue()}
+                        style={{
+                          background: store.isQueued(prompt.id) ? "var(--queued-bg)" : "var(--border)",
+                          color: store.isQueued(prompt.id) ? "var(--queued-text)" : "#9aa3b2",
+                          border: store.isQueued(prompt.id) ? "1px solid var(--queued-border)" : "1px solid #3a3a3a",
+                          padding: "6px 12px",
+                          "font-size": "11px",
+                          cursor: store.syncingQueue() ? "default" : "pointer",
+                          "flex-shrink": "0",
+                        }}
+                      >
+                        {store.isQueued(prompt.id)
+                          ? `Queued ${store.queuePosition(prompt.id) + 1}`
+                          : "Add to Queue"}
+                      </button>
                     </div>
-                    <div
-                      style={{
-                        "font-size": "12px",
-                        "line-height": "1.65",
-                        color: "#d4d4d4",
-                        "white-space": "pre-wrap",
-                        "word-break": "break-word",
-                      }}
-                    >
+                    <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
                       {prompt.text}
                     </div>
                   </div>

@@ -18,7 +18,7 @@ import {
   type DirEntry,
   type AppConfig,
 } from "./ipc/types";
-import "./blog-preview.css";
+import "./styles/blog-preview.css";
 
 const { invoke } = (window as any).__TAURI__.core;
 const { shell } = (window as any).__TAURI__;

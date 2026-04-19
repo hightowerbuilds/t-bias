@@ -12,7 +12,7 @@ import EditorView from "./Editor";
 import FileExplorerView from "./FileExplorer";
 import FlipExplorerView from "./FlipExplorer";
 import PromptStackerView from "./PromptStacker";
-import type { AppConfig } from "./ipc/types";
+import type { AppConfig, ShellRecord } from "./ipc/types";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,11 +30,14 @@ export interface PanesRootProps {
   activePaneId: number;
   config: AppConfig;
   zoomed: boolean;
+  paneTitles: Record<number, string>;
   paneCwds: Record<number, string>;
   onActivate: (paneId: number) => void;
   onTitleChange: (paneId: number, title: string) => void;
   onProcessTitleChange: (paneId: number, title: string | null) => void;
   onCwdChange: (paneId: number, cwd: string) => void;
+  onShellRecordReady: (paneId: number, record: ShellRecord) => void;
+  onShellExit: (paneId: number) => void;
   onActivity: (paneId: number) => void;
   onRatioChange: (splitId: number, ratio: number) => void;
   onFlip?: (paneId: number) => void;
@@ -58,10 +61,15 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
                 paneId={props.activePaneId}
                 config={props.config}
                 initialCwd={(props.panes[props.activePaneId] as TerminalPane)?.cwd}
+                shellId={(props.panes[props.activePaneId] as TerminalPane)?.shellId}
+                initialTitle={props.paneTitles?.[props.activePaneId] ?? "Shell"}
+                defaultPersistOnQuit={props.config.shells.persist_on_quit}
                 isActive={true}
                 onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
                 onProcessTitleChange={(t) => props.onProcessTitleChange(props.activePaneId, t)}
                 onCwdChange={(cwd) => props.onCwdChange(props.activePaneId, cwd)}
+                onShellRecordReady={(record) => props.onShellRecordReady(props.activePaneId, record)}
+                onExit={() => props.onShellExit(props.activePaneId)}
                 onActivity={() => props.onActivity(props.activePaneId)}
               />
             </Match>
@@ -154,16 +162,21 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
               }}
             >
               <Show when={props.paneId === props.activePaneId}>
-                <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+                <div class="pane-active-border" />
               </Show>
               <TerminalView
                 paneId={props.paneId}
                 config={props.config}
                 initialCwd={(pane() as TerminalPane)?.cwd}
+                shellId={(pane() as TerminalPane)?.shellId}
+                initialTitle={props.paneTitles?.[props.paneId] ?? "Shell"}
+                defaultPersistOnQuit={props.config.shells.persist_on_quit}
                 isActive={props.paneId === props.activePaneId && !(pane() as TerminalPane)?.flipped}
                 onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
                 onProcessTitleChange={(t) => props.onProcessTitleChange(props.paneId, t)}
                 onCwdChange={(cwd) => props.onCwdChange(props.paneId, cwd)}
+                onShellRecordReady={(record) => props.onShellRecordReady(props.paneId, record)}
+                onExit={() => props.onShellExit(props.paneId)}
                 onActivity={() => props.onActivity(props.paneId)}
               />
             </div>
@@ -179,7 +192,7 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
               }}
             >
               <Show when={props.paneId === props.activePaneId}>
-                <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+                <div class="pane-active-border" />
               </Show>
               <FlipExplorerView
                 paneId={props.paneId}
@@ -199,7 +212,7 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
           onClick={() => props.onActivate(props.paneId)}
         >
           <Show when={props.paneId === props.activePaneId}>
-            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+            <div class="pane-active-border" />
           </Show>
           <FileExplorerView
             paneId={props.paneId}
@@ -219,7 +232,7 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
           onClick={() => props.onActivate(props.paneId)}
         >
           <Show when={props.paneId === props.activePaneId}>
-            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+            <div class="pane-active-border" />
           </Show>
           <EditorView
             paneId={props.paneId}
@@ -238,7 +251,7 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
           onClick={() => props.onActivate(props.paneId)}
         >
           <Show when={props.paneId === props.activePaneId}>
-            <div style={{ position: "absolute", inset: "0", border: "1px solid #3d6dcc", "pointer-events": "none", "z-index": "20", "box-sizing": "border-box" }} />
+            <div class="pane-active-border" />
           </Show>
           <PromptStackerView
             config={props.config}
@@ -331,14 +344,14 @@ const SplitView: Component<SplitViewProps> = (props) => {
         style={{
           [isH() ? "width" : "height"]: `${DIVIDER_PX}px`,
           [isH() ? "height" : "width"]: "100%",
-          background: active() ? "#5b8aff" : "#1e1e1e",
+          background: active() ? "var(--accent)" : "var(--bg-base)",
           cursor: isH() ? "col-resize" : "row-resize",
           "flex-shrink": "0",
           "z-index": "10",
-          "border-left": isH() ? "1px solid #2e2e2e" : "none",
-          "border-top": isH() ? "none" : "1px solid #2e2e2e",
-          "border-right": isH() ? "1px solid #2e2e2e" : "none",
-          "border-bottom": isH() ? "none" : "1px solid #2e2e2e",
+          "border-left": isH() ? "1px solid var(--border-light)" : "none",
+          "border-top": isH() ? "none" : "1px solid var(--border-light)",
+          "border-right": isH() ? "1px solid var(--border-light)" : "none",
+          "border-bottom": isH() ? "none" : "1px solid var(--border-light)",
         }}
       />
 

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 /// Maximum bytes to read in a single syscall.
@@ -23,6 +24,36 @@ impl PtyState {
     pub fn new() -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Terminate every tracked PTY process. Called from the Tauri exit handler
+    /// to guarantee child processes do not outlive the app.
+    pub fn close_all(&self) {
+        let mut panes = match self.panes.lock() {
+            Ok(panes) => panes,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let pane_ids: Vec<u32> = panes.keys().copied().collect();
+        for pane_id in pane_ids {
+            if let Some(mut pane) = panes.remove(&pane_id) {
+                let foreground_pgid = pane.master.process_group_leader();
+                let shell_pgid = pane
+                    .child_pid
+                    .and_then(|pid| get_process_group_id(pid as i32));
+                log::info!(
+                    "close_all pane_id={} child_pid={:?} fg_pgid={:?} shell_pgid={:?}",
+                    pane_id,
+                    pane.child_pid,
+                    foreground_pgid,
+                    shell_pgid,
+                );
+                terminate_process_group(foreground_pgid);
+                if shell_pgid != foreground_pgid {
+                    terminate_process_group(shell_pgid);
+                }
+                let _ = pane.killer.kill();
+            }
         }
     }
 }
@@ -180,8 +211,26 @@ pub fn close_pane(
 ) -> Result<(), String> {
     let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
     if let Some(mut pane) = panes.remove(&pane_id) {
-        // Make close semantics explicit: closing a terminal pane terminates
-        // the child rather than relying on PTY drop behavior alone.
+        let foreground_pgid = pane.master.process_group_leader();
+        let shell_pgid = pane
+            .child_pid
+            .and_then(|pid| get_process_group_id(pid as i32));
+
+        log::info!(
+            "close_pane pane_id={} child_pid={:?} fg_pgid={:?} shell_pgid={:?}",
+            pane_id,
+            pane.child_pid,
+            foreground_pgid,
+            shell_pgid
+        );
+
+        // Terminate the active PTY process group first so foreground jobs like
+        // `sleep`, `vim`, or `less` do not outlive the pane close. Follow with
+        // the shell killer as a cleanup path for the original child handle.
+        terminate_process_group(foreground_pgid);
+        if shell_pgid != foreground_pgid {
+            terminate_process_group(shell_pgid);
+        }
         let _ = pane.killer.kill();
     }
     Ok(())
@@ -243,6 +292,55 @@ fn is_shell_process(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "tcsh" | "csh" | "nu" | "pwsh" | "powershell" | "login"
     )
+}
+
+fn terminate_process_group(pgid: Option<i32>) {
+    let Some(pgid) = pgid.filter(|pgid| *pgid > 0) else {
+        return;
+    };
+
+    log::info!("terminate_process_group pgid={}", pgid);
+    unsafe {
+        // SIGHUP matches terminal hangup semantics and terminates most
+        // foreground PTY jobs cleanly.
+        libc::killpg(pgid, libc::SIGHUP);
+        // Resume any stopped process so the hangup can take effect.
+        libc::killpg(pgid, libc::SIGCONT);
+        libc::killpg(pgid, libc::SIGTERM);
+    }
+
+    if process_group_exists(pgid) {
+        std::thread::sleep(Duration::from_millis(60));
+    }
+
+    if process_group_exists(pgid) {
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
+        }
+    }
+}
+
+fn get_process_group_id(pid: i32) -> Option<i32> {
+    if pid <= 0 {
+        return None;
+    }
+    match unsafe { libc::getpgid(pid) } {
+        pgid if pgid > 0 => Some(pgid),
+        _ => None,
+    }
+}
+
+fn process_group_exists(pgid: i32) -> bool {
+    if pgid <= 0 {
+        return false;
+    }
+
+    let result = unsafe { libc::kill(-pgid, 0) };
+    if result == 0 {
+        true
+    } else {
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
 }
 
 fn format_process_title(process_name: &str, exec_path: Option<&str>) -> String {

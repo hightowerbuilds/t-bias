@@ -1,0 +1,100 @@
+/* ------------------------------------------------------------------ */
+/* Reset (moved from index.html)                                      */
+/* ------------------------------------------------------------------ */
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1e1e1e;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Design tokens                                                       */
+/* ------------------------------------------------------------------ */
+
+:root {
+  /* Backgrounds */
+  --bg-base: #1e1e1e;
+  --bg-panel: #181818;
+  --bg-deep: #121212;
+  --bg-surface: #1a1a1a;
+  --bg-overlay: #171717;
+  --bg-input: #111;
+  --bg-elevated: #232323;
+  --bg-tab-bar: #141414;
+
+  /* Text */
+  --text-primary: #d4d4d4;
+  --text-bright: #ececec;
+  --text-muted: #888;
+  --text-dim: #666;
+  --text-faint: #555;
+  --text-label: #6f6f6f;
+  --text-sublabel: #777;
+
+  /* Accent */
+  --accent: #5b8aff;
+  --accent-activity: #7eadff;
+  --active-border: #3d6dcc;
+
+  /* Error / destructive */
+  --error: #c0392b;
+  --error-border: #e74c3c;
+  --error-text: #f44747;
+
+  /* Success */
+  --success-bg: #24402a;
+  --success-text: #8bc98f;
+
+  /* Borders */
+  --border: #2a2a2a;
+  --border-subtle: #252525;
+  --border-input: #333;
+  --border-strong: #444;
+  --border-separator: #222;
+  --border-light: #2e2e2e;
+
+  /* Interactive states */
+  --selected-bg: #2a2d2e;
+  --drag-over-bg: #264f78;
+  --queued-bg: #243248;
+  --queued-border: #37527a;
+  --queued-text: #d9e6ff;
+  --detached-bg: #1f3048;
+  --detached-text: #b8d7ff;
+  --open-bg: #223752;
+  --open-border: #355784;
+  --open-text: #d7e8ff;
+
+  /* Typography */
+  --font-mono: Menlo, Monaco, 'Courier New', monospace;
+
+  /* Border radii */
+  --radius-sm: 3px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  /* Shadows */
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-landing: 0 24px 60px rgba(0, 0, 0, 0.45);
+
+  /* Z-index layers */
+  --z-context-menu: 99;
+  --z-stacker-modal: 120;
+  --z-shell-landing: 130;
+  --z-close-dialog: 200;
+}

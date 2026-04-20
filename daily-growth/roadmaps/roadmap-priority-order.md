@@ -8,13 +8,13 @@ Choose a single smart order for the active roadmaps so work compounds instead of
 
 ## Active Roadmaps
 
-1. `feature-roadmap.md`
-2. `leftover-followup.md` (manual testing, docs, minor code from trust hardening)
+1. `leftover-followup.md` — manual testing, documentation, and future items across all completed roadmaps
 
 ## Completed Roadmaps (in `old-maps/`)
 
-- `terminal-trust-hardening-roadmap.md` — completed 2026-04-19 (6 phases, code work done)
-- `prompt-queue-roadmap.md` — completed 2026-04-19 (5 phases, code work done)
+- `terminal-trust-hardening-roadmap.md` — completed 2026-04-19 (6 phases)
+- `prompt-queue-roadmap.md` — completed 2026-04-19 (5 phases)
+- `feature-roadmap.md` — completed 2026-04-19 (Phases 1-3 done, 4-6 tracked in leftover-followup)
 
 `old-maps/` should be treated as archive/reference, not active planning.
 

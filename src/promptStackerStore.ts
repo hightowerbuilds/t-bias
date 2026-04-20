@@ -6,6 +6,7 @@ import {
   DELETE_PROMPT_CMD,
   DUPLICATE_PROMPT_CMD,
   SET_PROMPT_QUEUE_CMD,
+  SET_PROMPT_TAGS_CMD,
   EXPORT_PROMPTS_CMD,
   IMPORT_PROMPTS_CMD,
   type PromptRecord,
@@ -40,6 +41,10 @@ export interface PromptStackerStore {
   searchFilter: () => string;
   setSearchFilter: (value: string) => void;
   filteredPrompts: () => PromptRecord[];
+  setTags: (promptId: string, tags: string[]) => Promise<boolean>;
+  tagFilter: () => string;
+  setTagFilter: (tag: string) => void;
+  allTags: () => string[];
   exportPrompts: () => Promise<string | null>;
   importPrompts: (json: string) => Promise<boolean>;
 }
@@ -51,6 +56,7 @@ export interface PromptStackerClient {
   deletePrompt: (promptId: string) => Promise<PromptStackerState>;
   duplicatePrompt: (promptId: string) => Promise<PromptRecord>;
   setQueue: (queue: string[]) => Promise<PromptStackerState>;
+  setTags: (promptId: string, tags: string[]) => Promise<PromptRecord>;
   exportPrompts: () => Promise<string>;
   importPrompts: (json: string) => Promise<PromptStackerState>;
 }
@@ -70,6 +76,7 @@ const defaultPromptStackerClient: PromptStackerClient = {
   deletePrompt: (promptId) => invokeTauri<PromptStackerState>(DELETE_PROMPT_CMD, { promptId }),
   duplicatePrompt: (promptId) => invokeTauri<PromptRecord>(DUPLICATE_PROMPT_CMD, { promptId }),
   setQueue: (queue) => invokeTauri<PromptStackerState>(SET_PROMPT_QUEUE_CMD, { queue }),
+  setTags: (promptId, tags) => invokeTauri<PromptRecord>(SET_PROMPT_TAGS_CMD, { promptId, tags }),
   exportPrompts: () => invokeTauri<string>(EXPORT_PROMPTS_CMD),
   importPrompts: (json) => invokeTauri<PromptStackerState>(IMPORT_PROMPTS_CMD, { json }),
 };
@@ -85,6 +92,7 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
     const [loaded, setLoaded] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
     const [searchFilter, setSearchFilter] = createSignal("");
+    const [tagFilter, setTagFilter] = createSignal("");
 
     const applyState = (state: PromptStackerState) => {
       setPrompts(state.prompts);
@@ -245,9 +253,35 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
       searchFilter,
       setSearchFilter,
       filteredPrompts: () => {
+        let result = prompts();
+        const tag = tagFilter();
+        if (tag) {
+          result = result.filter((p) => p.tags?.includes(tag));
+        }
         const q = searchFilter().toLowerCase().trim();
-        if (!q) return prompts();
-        return prompts().filter((p) => p.text.toLowerCase().includes(q));
+        if (q) {
+          result = result.filter((p) => p.text.toLowerCase().includes(q));
+        }
+        return result;
+      },
+      setTags: async (promptId: string, tags: string[]) => {
+        try {
+          const updated = await client.setTags(promptId, tags);
+          setPrompts((current) => current.map((p) => (p.id === updated.id ? updated : p)));
+          return true;
+        } catch (err) {
+          setError(String(err));
+          return false;
+        }
+      },
+      tagFilter,
+      setTagFilter,
+      allTags: () => {
+        const tags = new Set<string>();
+        for (const p of prompts()) {
+          if (p.tags) for (const t of p.tags) tags.add(t);
+        }
+        return [...tags].sort();
       },
       exportPrompts: async () => {
         try {

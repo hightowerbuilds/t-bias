@@ -36,6 +36,7 @@ pub fn run() {
             prompt_stacker::delete_prompt,
             prompt_stacker::duplicate_prompt,
             prompt_stacker::set_prompt_queue,
+            prompt_stacker::set_prompt_tags,
             prompt_stacker::export_prompts,
             prompt_stacker::import_prompts,
             shell_registry::prepare_shell_registry_for_launch,

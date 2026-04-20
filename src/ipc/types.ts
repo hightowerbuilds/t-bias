@@ -120,6 +120,7 @@ export interface PromptRecord {
   id: string;
   text: string;
   created_at: number;
+  tags: string[];
 }
 
 export interface PromptStackerState {
@@ -185,6 +186,7 @@ export const EDIT_PROMPT_CMD          = "edit_prompt"          as const;
 export const DELETE_PROMPT_CMD        = "delete_prompt"        as const;
 export const DUPLICATE_PROMPT_CMD     = "duplicate_prompt"     as const;
 export const SET_PROMPT_QUEUE_CMD     = "set_prompt_queue"     as const;
+export const SET_PROMPT_TAGS_CMD     = "set_prompt_tags"      as const;
 export const EXPORT_PROMPTS_CMD      = "export_prompts"       as const;
 export const IMPORT_PROMPTS_CMD      = "import_prompts"       as const;
 export const PREPARE_SHELL_REGISTRY_FOR_LAUNCH_CMD = "prepare_shell_registry_for_launch" as const;

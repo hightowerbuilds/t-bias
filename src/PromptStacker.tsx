@@ -110,8 +110,27 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
       <Show
         when={editing()}
         fallback={
-          <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
-            {cardProps.prompt.text}
+          <div>
+            <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
+              {cardProps.prompt.text}
+            </div>
+            <Show when={cardProps.prompt.tags?.length > 0}>
+              <div style={{ display: "flex", gap: "4px", "flex-wrap": "wrap", "margin-top": "8px" }}>
+                <For each={cardProps.prompt.tags}>
+                  {(tag) => (
+                    <span style={{
+                      background: "var(--bg-elevated)",
+                      color: "var(--text-dim)",
+                      padding: "2px 8px",
+                      "border-radius": "var(--radius-pill)",
+                      "font-size": "10px",
+                    }}>
+                      {tag}
+                    </span>
+                  )}
+                </For>
+              </div>
+            </Show>
           </div>
         }
       >
@@ -134,6 +153,26 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
             "font-size": "13px",
             "line-height": "1.6",
             "margin-bottom": "8px",
+          }}
+        />
+        <input
+          type="text"
+          placeholder="Tags (comma-separated)"
+          value={(cardProps.prompt.tags ?? []).join(", ")}
+          onChange={(e) => {
+            const tags = e.currentTarget.value.split(",").map(t => t.trim()).filter(Boolean);
+            void store.setTags(cardProps.prompt.id, tags);
+          }}
+          class="input-field"
+          style={{
+            width: "100%",
+            height: "28px",
+            padding: "0 10px",
+            "font-size": "11px",
+            "border-radius": "var(--radius-md)",
+            color: cardProps.config.theme.foreground,
+            "margin-bottom": "8px",
+            "box-sizing": "border-box",
           }}
         />
         <div style={{ display: "flex", gap: "8px", "justify-content": "flex-end" }}>
@@ -370,6 +409,44 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
                   color: props.config.theme.foreground,
                 }}
               />
+            </Show>
+            <Show when={store.allTags().length > 0}>
+              <div style={{ display: "flex", gap: "4px", "flex-wrap": "wrap" }}>
+                <button
+                  onClick={() => store.setTagFilter("")}
+                  style={{
+                    background: !store.tagFilter() ? "var(--accent)" : "var(--bg-elevated)",
+                    color: !store.tagFilter() ? "#fff" : "var(--text-dim)",
+                    border: "none",
+                    "border-radius": "var(--radius-pill)",
+                    padding: "2px 10px",
+                    "font-size": "10px",
+                    cursor: "pointer",
+                    "font-family": "inherit",
+                  }}
+                >
+                  All
+                </button>
+                <For each={store.allTags()}>
+                  {(tag) => (
+                    <button
+                      onClick={() => store.setTagFilter(store.tagFilter() === tag ? "" : tag)}
+                      style={{
+                        background: store.tagFilter() === tag ? "var(--accent)" : "var(--bg-elevated)",
+                        color: store.tagFilter() === tag ? "#fff" : "var(--text-dim)",
+                        border: "none",
+                        "border-radius": "var(--radius-pill)",
+                        padding: "2px 10px",
+                        "font-size": "10px",
+                        cursor: "pointer",
+                        "font-family": "inherit",
+                      }}
+                    >
+                      {tag}
+                    </button>
+                  )}
+                </For>
+              </div>
             </Show>
           </div>
 

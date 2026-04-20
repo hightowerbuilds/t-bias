@@ -77,7 +77,7 @@ Collected from Terminal Trust Hardening, Prompt Queue, and Feature Roadmaps (202
 - [x] Scrollback soft-wrap tracking added (sbSoftWrapped); ring buffer reflow deferred
 
 ### Prompt Library
-- [ ] Tags, folders, or lightweight categories for prompts
+- [x] Tags, folders, or lightweight categories for prompts
 - [x] Import/export for prompt libraries
 
 ### Backend/PTY Test Coverage (needs Tauri runtime)

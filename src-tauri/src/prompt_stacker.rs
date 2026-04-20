@@ -8,6 +8,8 @@ pub struct PromptRecord {
     pub id: String,
     pub text: String,
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -111,6 +113,7 @@ pub fn save_prompt(text: String) -> Result<PromptRecord, String> {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
+        tags: vec![],
     };
 
     state.prompts.insert(0, prompt.clone());
@@ -162,6 +165,7 @@ pub fn duplicate_prompt(prompt_id: String) -> Result<PromptRecord, String> {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
+        tags: source.tags.clone(),
     };
     // Insert right after the source prompt.
     let idx = state.prompts.iter().position(|p| p.id == prompt_id).unwrap_or(0);
@@ -177,6 +181,28 @@ pub fn set_prompt_queue(queue: Vec<String>) -> Result<PromptStackerState, String
     let normalized = normalize_state(state);
     save_prompt_stacker_state_inner(&normalized)?;
     Ok(normalized)
+}
+
+#[tauri::command]
+pub fn set_prompt_tags(prompt_id: String, tags: Vec<String>) -> Result<PromptRecord, String> {
+    let mut state = load_prompt_stacker_state_inner()?;
+    let prompt = state
+        .prompts
+        .iter_mut()
+        .find(|p| p.id == prompt_id)
+        .ok_or("prompt not found")?;
+    // Normalize: trim, deduplicate, sort.
+    let mut clean: Vec<String> = tags
+        .into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    clean.sort();
+    clean.dedup();
+    prompt.tags = clean;
+    let updated = prompt.clone();
+    save_prompt_stacker_state_inner(&state)?;
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -209,7 +235,7 @@ mod tests {
     use super::*;
 
     fn p(id: &str, text: &str) -> PromptRecord {
-        PromptRecord { id: id.to_string(), text: text.to_string(), created_at: 1 }
+        PromptRecord { id: id.to_string(), text: text.to_string(), created_at: 1, tags: vec![] }
     }
 
     #[test]

@@ -90,12 +90,14 @@ Note (2026-04-19): Rust backend gained `edit_prompt`, `delete_prompt`, `duplicat
 
 Harden the queue so it feels like a real app feature rather than a convenience layer.
 
-- [ ] Add frontend tests for queue add/remove/reorder flows
-- [ ] Add backend tests for prompt-stacker file migration and queue persistence
-- [ ] Test clipboard failure behavior and fallback handling
-- [ ] Verify queue state survives app restart and session restore
+- [x] Add frontend tests for queue add/remove/reorder flows
+- [x] Add backend tests for prompt-stacker file migration and queue persistence
+- [x] Test clipboard failure behavior and fallback handling
+- [ ] Verify queue state survives app restart and session restore (manual)
 - [ ] Document queue behavior in the README once stable
-- [ ] Keep naming consistent: Prompt Stacker, queue, footer bar, shell actions
+- [x] Keep naming consistent: Prompt Stacker, queue, footer bar, shell actions
+
+Note (2026-04-19): Frontend: 15 prompt stacker store tests covering load, save, toggle, reload, remove, clear, move, advance, edit, delete, duplicate, search filter, boundary checks. Rust: 4 tests for normalize_state (dead refs, dedup), legacy JSON migration, current JSON format. Clipboard fallback is handled — sendToShell falls back to copyPrompt on failure. 103 frontend + 8 Rust tests.
 
 **Exit criteria:** queue behavior is stable, testable, and accurately described in product docs.
 

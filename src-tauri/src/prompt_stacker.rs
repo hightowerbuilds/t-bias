@@ -178,3 +178,59 @@ pub fn set_prompt_queue(queue: Vec<String>) -> Result<PromptStackerState, String
     save_prompt_stacker_state_inner(&normalized)?;
     Ok(normalized)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(id: &str, text: &str) -> PromptRecord {
+        PromptRecord { id: id.to_string(), text: text.to_string(), created_at: 1 }
+    }
+
+    #[test]
+    fn normalize_removes_queue_refs_to_deleted_prompts() {
+        let state = PromptStackerState {
+            prompts: vec![p("a", "Alpha"), p("b", "Beta")],
+            queue: vec!["a".into(), "gone".into(), "b".into()],
+        };
+        let result = normalize_state(state);
+        assert_eq!(result.queue, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn normalize_deduplicates_queue() {
+        let state = PromptStackerState {
+            prompts: vec![p("a", "Alpha")],
+            queue: vec!["a".into(), "a".into(), "a".into()],
+        };
+        let result = normalize_state(state);
+        assert_eq!(result.queue, vec!["a"]);
+    }
+
+    #[test]
+    fn legacy_json_migration() {
+        // Legacy format: just an array of prompts (no queue wrapper)
+        let json = r#"[{"id":"1","text":"Hello","created_at":1}]"#;
+        let parsed: PromptStackerFile = serde_json::from_str(json).unwrap();
+        match parsed {
+            PromptStackerFile::LegacyPrompts(prompts) => {
+                assert_eq!(prompts.len(), 1);
+                assert_eq!(prompts[0].text, "Hello");
+            }
+            _ => panic!("expected LegacyPrompts variant"),
+        }
+    }
+
+    #[test]
+    fn current_json_format() {
+        let json = r#"{"prompts":[{"id":"1","text":"Hello","created_at":1}],"queue":["1"]}"#;
+        let parsed: PromptStackerFile = serde_json::from_str(json).unwrap();
+        match parsed {
+            PromptStackerFile::State(state) => {
+                assert_eq!(state.prompts.len(), 1);
+                assert_eq!(state.queue, vec!["1"]);
+            }
+            _ => panic!("expected State variant"),
+        }
+    }
+}

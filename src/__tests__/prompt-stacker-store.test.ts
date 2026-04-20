@@ -19,6 +19,31 @@ function makeClient(state: PromptStackerState): PromptStackerClient {
       };
       return prompt;
     }),
+    editPrompt: vi.fn(async (promptId: string, text: string) => {
+      currentState = {
+        ...currentState,
+        prompts: currentState.prompts.map((p) =>
+          p.id === promptId ? { ...p, text } : p,
+        ),
+      };
+      return currentState.prompts.find((p) => p.id === promptId)!;
+    }),
+    deletePrompt: vi.fn(async (promptId: string) => {
+      currentState = {
+        ...currentState,
+        prompts: currentState.prompts.filter((p) => p.id !== promptId),
+        queue: currentState.queue.filter((id) => id !== promptId),
+      };
+      return structuredClone(currentState);
+    }),
+    duplicatePrompt: vi.fn(async (promptId: string) => {
+      const source = currentState.prompts.find((p) => p.id === promptId)!;
+      const dup = makePrompt(`dup-${promptId}`, source.text, 99);
+      const idx = currentState.prompts.findIndex((p) => p.id === promptId);
+      currentState.prompts.splice(idx + 1, 0, dup);
+      currentState = { ...currentState, prompts: [...currentState.prompts] };
+      return dup;
+    }),
     setQueue: vi.fn(async (queue: string[]) => {
       currentState = {
         ...currentState,
@@ -211,5 +236,89 @@ describe("prompt-stacker-store", () => {
     await store.moveInQueue("b", 1);  // Already at end
 
     expect(client.setQueue).not.toHaveBeenCalled();
+  });
+
+  it("edits a prompt's text", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "Original text")],
+      queue: [],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    const ok = await store.editPrompt("a", "Updated text");
+
+    expect(ok).toBe(true);
+    expect(client.editPrompt).toHaveBeenCalledWith("a", "Updated text");
+    expect(store.prompts()[0].text).toBe("Updated text");
+  });
+
+  it("edit rejects empty text", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "Original")],
+      queue: [],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    const ok = await store.editPrompt("a", "   ");
+
+    expect(ok).toBe(false);
+    expect(client.editPrompt).not.toHaveBeenCalled();
+  });
+
+  it("deletes a prompt and cleans it from the queue", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second")],
+      queue: ["a", "b"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.deletePrompt("a");
+
+    expect(client.deletePrompt).toHaveBeenCalledWith("a");
+    expect(store.prompts().map((p) => p.id)).toEqual(["b"]);
+    expect(store.queueIds()).toEqual(["b"]);
+  });
+
+  it("duplicates a prompt and inserts it after the original", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "Alpha"), makePrompt("b", "Beta")],
+      queue: [],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.duplicatePrompt("a");
+
+    expect(client.duplicatePrompt).toHaveBeenCalledWith("a");
+    const ids = store.prompts().map((p) => p.id);
+    expect(ids).toEqual(["a", "dup-a", "b"]);
+    expect(store.prompts()[1].text).toBe("Alpha");
+  });
+
+  it("filters prompts by search text", async () => {
+    const client = makeClient({
+      prompts: [
+        makePrompt("a", "Deploy to production"),
+        makePrompt("b", "Run unit tests"),
+        makePrompt("c", "Deploy staging"),
+      ],
+      queue: [],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    expect(store.filteredPrompts()).toHaveLength(3);
+
+    store.setSearchFilter("deploy");
+    expect(store.filteredPrompts().map((p) => p.id)).toEqual(["a", "c"]);
+
+    store.setSearchFilter("xyz");
+    expect(store.filteredPrompts()).toHaveLength(0);
+
+    store.setSearchFilter("");
+    expect(store.filteredPrompts()).toHaveLength(3);
   });
 });

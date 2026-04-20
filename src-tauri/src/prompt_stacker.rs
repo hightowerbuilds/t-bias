@@ -179,6 +179,31 @@ pub fn set_prompt_queue(queue: Vec<String>) -> Result<PromptStackerState, String
     Ok(normalized)
 }
 
+#[tauri::command]
+pub fn export_prompts() -> Result<String, String> {
+    let state = load_prompt_stacker_state_inner()?;
+    serde_json::to_string_pretty(&state.prompts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_prompts(json: String) -> Result<PromptStackerState, String> {
+    let imported: Vec<PromptRecord> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let mut state = load_prompt_stacker_state_inner()?;
+    // Deduplicate by ID — imported prompts with existing IDs are skipped.
+    let existing_ids: std::collections::HashSet<String> =
+        state.prompts.iter().map(|p| p.id.clone()).collect();
+    for prompt in imported {
+        if !existing_ids.contains(&prompt.id) {
+            state.prompts.push(prompt);
+        }
+    }
+    // Sort by created_at descending (newest first).
+    state.prompts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let normalized = normalize_state(state);
+    save_prompt_stacker_state_inner(&normalized)?;
+    Ok(normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

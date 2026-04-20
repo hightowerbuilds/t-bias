@@ -6,6 +6,8 @@ import {
   DELETE_PROMPT_CMD,
   DUPLICATE_PROMPT_CMD,
   SET_PROMPT_QUEUE_CMD,
+  EXPORT_PROMPTS_CMD,
+  IMPORT_PROMPTS_CMD,
   type PromptRecord,
   type PromptStackerState,
 } from "./ipc/types";
@@ -38,6 +40,8 @@ export interface PromptStackerStore {
   searchFilter: () => string;
   setSearchFilter: (value: string) => void;
   filteredPrompts: () => PromptRecord[];
+  exportPrompts: () => Promise<string | null>;
+  importPrompts: (json: string) => Promise<boolean>;
 }
 
 export interface PromptStackerClient {
@@ -47,6 +51,8 @@ export interface PromptStackerClient {
   deletePrompt: (promptId: string) => Promise<PromptStackerState>;
   duplicatePrompt: (promptId: string) => Promise<PromptRecord>;
   setQueue: (queue: string[]) => Promise<PromptStackerState>;
+  exportPrompts: () => Promise<string>;
+  importPrompts: (json: string) => Promise<PromptStackerState>;
 }
 
 function invokeTauri<T>(command: string, args?: Record<string, unknown>) {
@@ -64,6 +70,8 @@ const defaultPromptStackerClient: PromptStackerClient = {
   deletePrompt: (promptId) => invokeTauri<PromptStackerState>(DELETE_PROMPT_CMD, { promptId }),
   duplicatePrompt: (promptId) => invokeTauri<PromptRecord>(DUPLICATE_PROMPT_CMD, { promptId }),
   setQueue: (queue) => invokeTauri<PromptStackerState>(SET_PROMPT_QUEUE_CMD, { queue }),
+  exportPrompts: () => invokeTauri<string>(EXPORT_PROMPTS_CMD),
+  importPrompts: (json) => invokeTauri<PromptStackerState>(IMPORT_PROMPTS_CMD, { json }),
 };
 
 export function createPromptStackerStore(client: PromptStackerClient = defaultPromptStackerClient) {
@@ -240,6 +248,24 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
         const q = searchFilter().toLowerCase().trim();
         if (!q) return prompts();
         return prompts().filter((p) => p.text.toLowerCase().includes(q));
+      },
+      exportPrompts: async () => {
+        try {
+          return await client.exportPrompts();
+        } catch (err) {
+          setError(String(err));
+          return null;
+        }
+      },
+      importPrompts: async (json: string) => {
+        try {
+          const state = await client.importPrompts(json);
+          applyState(state);
+          return true;
+        } catch (err) {
+          setError(String(err));
+          return false;
+        }
       },
     };
   });

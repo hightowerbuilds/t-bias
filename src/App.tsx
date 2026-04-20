@@ -567,6 +567,7 @@ const App: Component = () => {
   let unlistenClose: (() => void) | undefined;
   let unlistenFileExplorer: (() => void) | undefined;
   let unlistenCodeEditor: (() => void) | undefined;
+  let unlistenConfigChanged: (() => void) | undefined;
 
   onMount(async () => {
     const cfg = (await invoke(GET_CONFIG_CMD)) as AppConfig;
@@ -575,6 +576,15 @@ const App: Component = () => {
     const restorable = prepared.filter(isRestorableShell);
 
     setConfig(cfg);
+
+    // Apply window opacity from config.
+    if (cfg.opacity < 1.0) {
+      const { getCurrentWindow } = (window as any).__TAURI__.window;
+      getCurrentWindow().setAlwaysOnTop(false).catch(() => {});
+      // Tauri v2: use the alpha channel on the window background.
+      document.documentElement.style.background = "transparent";
+      document.body.style.background = "transparent";
+    }
 
     // Try to restore the full workspace layout from session.json first.
     // Fall back to flat shell-record tabs if no layout exists.
@@ -633,6 +643,12 @@ const App: Component = () => {
       setTabs((prev) => [...prev, nextTab]);
       setActiveTabId(nextTab.id);
     });
+
+    // Config hot-reload — backend polls the config file and emits on change.
+    unlistenConfigChanged = await listen("config-changed", (event: any) => {
+      const nextCfg = event.payload as AppConfig;
+      if (nextCfg) setConfig(nextCfg);
+    });
   });
 
   onCleanup(() => {
@@ -640,6 +656,7 @@ const App: Component = () => {
     unlistenClose?.();
     unlistenFileExplorer?.();
     unlistenCodeEditor?.();
+    unlistenConfigChanged?.();
   });
 
   // ---------------------------------------------------------------------------

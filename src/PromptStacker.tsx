@@ -183,6 +183,20 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
     if (saved) focusDraftInput();
   };
 
+  const exportLibrary = async () => {
+    const json = await store.exportPrompts();
+    if (json) {
+      await navigator.clipboard.writeText(json);
+    }
+  };
+
+  const importLibrary = async () => {
+    try {
+      const json = await navigator.clipboard.readText();
+      if (json) await store.importPrompts(json);
+    } catch { /* clipboard unavailable */ }
+  };
+
   const formatDate = (createdAt: number) =>
     new Date(createdAt * 1000).toLocaleString([], {
       month: "short",
@@ -227,6 +241,20 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
             <div style={{ display: "flex", "align-items": "center", gap: "10px", "font-size": "12px", color: "var(--text-dim)" }}>
               <span>{store.prompts().length} saved</span>
               <span>{store.queueIds().length} queued</span>
+              <button
+                onClick={() => void exportLibrary()}
+                title="Export prompts to clipboard (JSON)"
+                style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", "font-size": "11px", padding: "2px 6px" }}
+              >
+                Export
+              </button>
+              <button
+                onClick={() => void importLibrary()}
+                title="Import prompts from clipboard (JSON)"
+                style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", "font-size": "11px", padding: "2px 6px" }}
+              >
+                Import
+              </button>
             </div>
             <Show when={closeAction()}>
               <button

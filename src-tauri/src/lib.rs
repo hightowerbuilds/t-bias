@@ -36,6 +36,8 @@ pub fn run() {
             prompt_stacker::delete_prompt,
             prompt_stacker::duplicate_prompt,
             prompt_stacker::set_prompt_queue,
+            prompt_stacker::export_prompts,
+            prompt_stacker::import_prompts,
             shell_registry::prepare_shell_registry_for_launch,
             shell_registry::list_shell_records,
             shell_registry::create_shell_record,
@@ -52,6 +54,14 @@ pub fn run() {
             session::delete_named_session,
         ])
         .setup(|app| {
+            // --config <path> CLI argument
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(idx) = args.iter().position(|a| a == "--config") {
+                if let Some(path) = args.get(idx + 1) {
+                    config::set_config_path(std::path::PathBuf::from(path));
+                }
+            }
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -87,6 +97,8 @@ pub fn run() {
                     _ => {}
                 }
             });
+
+            config::start_config_watcher(app.handle().clone());
 
             Ok(())
         })

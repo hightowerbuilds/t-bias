@@ -109,6 +109,9 @@ pub struct Config {
     pub shell: String,
     #[serde(default = "default_padding")]
     pub padding: u32,
+    /// Window opacity (0.0 = fully transparent, 1.0 = fully opaque).
+    #[serde(default = "default_opacity")]
+    pub opacity: f64,
     #[serde(default)]
     pub theme: ThemeConfig,
     #[serde(default)]
@@ -123,10 +126,15 @@ impl Default for Config {
             cursor: CursorConfig::default(),
             shell: default_shell(),
             padding: default_padding(),
+            opacity: default_opacity(),
             theme: ThemeConfig::default(),
             shells: ShellsConfig::default(),
         }
     }
+}
+
+fn default_opacity() -> f64 {
+    1.0
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +256,18 @@ fn apply_theme_preset(theme: &mut ThemeConfig) {
 // Config file path
 // ---------------------------------------------------------------------------
 
+use std::sync::OnceLock;
+static CONFIG_PATH_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set a custom config file path (from `--config` CLI argument).
+pub fn set_config_path(path: PathBuf) {
+    let _ = CONFIG_PATH_OVERRIDE.set(path);
+}
+
 fn config_path() -> Option<PathBuf> {
+    if let Some(p) = CONFIG_PATH_OVERRIDE.get() {
+        return Some(p.clone());
+    }
     let config_dir = dirs::config_dir()?;
     Some(config_dir.join("tbias").join("config.toml"))
 }
@@ -300,4 +319,32 @@ pub fn load_config() -> Config {
 #[tauri::command]
 pub fn get_config() -> Config {
     load_config()
+}
+
+// ---------------------------------------------------------------------------
+// Config hot-reload (mtime polling)
+// ---------------------------------------------------------------------------
+
+/// Start a background thread that polls the config file for changes.
+/// When the file is modified, emits a "config-changed" event with the new config.
+pub fn start_config_watcher(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    std::thread::spawn(move || {
+        let mut last_mtime: Option<std::time::SystemTime> = None;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let path = match config_path() {
+                Some(p) => p,
+                None => continue,
+            };
+            let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+            if mtime != last_mtime && last_mtime.is_some() {
+                // File changed — reload and emit
+                let cfg = load_config();
+                let _ = app.emit("config-changed", cfg);
+                log::info!("Config reloaded from {}", path.display());
+            }
+            last_mtime = mtime;
+        }
+    });
 }

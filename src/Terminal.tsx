@@ -108,6 +108,21 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       navigator.clipboard.writeText(text);
     };
 
+    terminal.core.onClipboardRead = async () => {
+      // Read via Tauri clipboard plugin to avoid WebKit permission prompts.
+      const tauri = (window as any).__TAURI__;
+      if (tauri?.core?.invoke) {
+        try {
+          const text = await tauri.core.invoke("plugin:clipboard-manager|read_text");
+          return typeof text === "string" ? text : null;
+        } catch { /* fall through */ }
+      }
+      if (navigator.clipboard?.readText) {
+        return await navigator.clipboard.readText();
+      }
+      return null;
+    };
+
     terminal.onTitleChange = (title) => {
       props.onTitleChange?.(title);
     };

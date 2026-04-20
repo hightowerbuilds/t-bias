@@ -84,17 +84,32 @@ export class TerminalCore {
   // =========================================================================
 
   /** Handle OSC 52 clipboard sequence. Payload format: "Pc;Pd" */
+  /** Callback to read clipboard text for OSC 52 query responses. */
+  onClipboardRead?: () => Promise<string | null>;
+
   private handleOsc52(payload: string): void {
     const semi = payload.indexOf(";");
     if (semi < 0) return;
+    const pc = payload.substring(0, semi); // selection: c, p, s, etc.
     const pd = payload.substring(semi + 1);
 
     if (pd === "?") {
-      // Query — not supported (would need async clipboard read)
+      // Query — read clipboard and respond with base64-encoded content.
+      if (this.onClipboardRead) {
+        this.onClipboardRead().then((text) => {
+          if (text != null) {
+            const encoded = btoa(text);
+            this.onResponse?.(`\x1b]52;${pc};${encoded}\x07`);
+          }
+        }).catch(() => {
+          // Clipboard read failed — respond with empty payload.
+          this.onResponse?.(`\x1b]52;${pc};\x07`);
+        });
+      }
       return;
     }
 
-    // Pd is base64-encoded text
+    // Pd is base64-encoded text — decode and pass to clipboard write callback.
     try {
       const text = atob(pd);
       this.onClipboard?.(text);

@@ -64,11 +64,13 @@ Wrapped lines should reflow when the terminal gets wider.
 
 Programs can request clipboard write via OSC 52. Currently received but ignored.
 
-- [ ] Decode base64 payload from OSC 52 sequences
-- [ ] Write decoded text to system clipboard via Tauri's clipboard API
-- [ ] Support read queries (OSC 52 with `?` payload) — respond with base64-encoded clipboard content
+- [x] Decode base64 payload from OSC 52 sequences
+- [x] Write decoded text to system clipboard via Tauri's clipboard API
+- [x] Support read queries (OSC 52 with `?` payload) — respond with base64-encoded clipboard content
 - [ ] Security: prompt or restrict clipboard access per-application (prevent silent clipboard hijacking)
 - [ ] Test with programs that use OSC 52 (e.g., `pbcopy` alternatives, Neovim clipboard integration)
+
+Note (2026-04-19): OSC 52 write was already working (base64 decode → navigator.clipboard). Added OSC 52 read query support — reads via Tauri clipboard plugin (avoids WebKit permission prompt), responds with base64-encoded content in the `\x1b]52;Pc;Pd\x07` format. Read uses the same Tauri clipboard plugin path as Cmd+V paste.
 
 ---
 

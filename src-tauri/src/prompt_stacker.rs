@@ -119,6 +119,58 @@ pub fn save_prompt(text: String) -> Result<PromptRecord, String> {
 }
 
 #[tauri::command]
+pub fn edit_prompt(prompt_id: String, text: String) -> Result<PromptRecord, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("prompt cannot be empty".to_string());
+    }
+
+    let mut state = load_prompt_stacker_state_inner()?;
+    let prompt = state
+        .prompts
+        .iter_mut()
+        .find(|p| p.id == prompt_id)
+        .ok_or("prompt not found")?;
+    prompt.text = trimmed.to_string();
+    let updated = prompt.clone();
+    save_prompt_stacker_state_inner(&state)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn delete_prompt(prompt_id: String) -> Result<PromptStackerState, String> {
+    let mut state = load_prompt_stacker_state_inner()?;
+    state.prompts.retain(|p| p.id != prompt_id);
+    // normalize_state automatically cleans up queue references to deleted prompts.
+    let normalized = normalize_state(state);
+    save_prompt_stacker_state_inner(&normalized)?;
+    Ok(normalized)
+}
+
+#[tauri::command]
+pub fn duplicate_prompt(prompt_id: String) -> Result<PromptRecord, String> {
+    let mut state = load_prompt_stacker_state_inner()?;
+    let source = state
+        .prompts
+        .iter()
+        .find(|p| p.id == prompt_id)
+        .ok_or("prompt not found")?;
+    let duplicate = PromptRecord {
+        id: next_prompt_id(),
+        text: source.text.clone(),
+        created_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    };
+    // Insert right after the source prompt.
+    let idx = state.prompts.iter().position(|p| p.id == prompt_id).unwrap_or(0);
+    state.prompts.insert(idx + 1, duplicate.clone());
+    save_prompt_stacker_state_inner(&state)?;
+    Ok(duplicate)
+}
+
+#[tauri::command]
 pub fn set_prompt_queue(queue: Vec<String>) -> Result<PromptStackerState, String> {
     let mut state = load_prompt_stacker_state_inner()?;
     state.queue = queue;

@@ -72,13 +72,15 @@ Note (2026-04-19): Click copies to clipboard; Shift+click sends directly to the 
 
 Make saved prompts maintainable as the library grows.
 
-- [ ] Edit an existing saved prompt
-- [ ] Delete saved prompts
-- [ ] Duplicate prompts
-- [ ] Add search/filter for large prompt libraries
+- [x] Edit an existing saved prompt
+- [x] Delete saved prompts
+- [x] Duplicate prompts
+- [x] Add search/filter for large prompt libraries
 - [ ] Consider tags, folders, or lightweight categories
 - [ ] Add import/export for prompt libraries
-- [ ] Decide how deleting a queued prompt updates the queue
+- [x] Decide how deleting a queued prompt updates the queue
+
+Note (2026-04-19): Rust backend gained `edit_prompt`, `delete_prompt`, `duplicate_prompt` commands. Store expanded with `editPrompt`, `deletePrompt`, `duplicatePrompt`, `searchFilter`, `filteredPrompts`. PromptStacker UI: each prompt card has Edit/Dup/Del buttons, inline edit mode with Cmd+Enter/Escape, search bar appears when >5 prompts. Deleting a prompt auto-cleans the queue (via `normalize_state`). 98 tests.
 
 **Exit criteria:** users can keep a long-lived prompt library clean without leaving stale queue entries behind.
 

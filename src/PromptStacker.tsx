@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createSignal,
   For,
   Show,
   onMount,
@@ -18,6 +19,140 @@ export interface PromptStackerViewProps {
   onClose?: () => void | Promise<void>;
   onBackToShell?: () => void | Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// PromptCard — individual prompt with edit, delete, duplicate, queue toggle
+// ---------------------------------------------------------------------------
+
+interface PromptCardProps {
+  prompt: { id: string; text: string; created_at: number };
+  store: ReturnType<typeof usePromptStackerStore>;
+  formatDate: (ts: number) => string;
+  config: AppConfig;
+}
+
+const PromptCard: Component<PromptCardProps> = (cardProps) => {
+  const [editing, setEditing] = createSignal(false);
+  const [editText, setEditText] = createSignal("");
+  const { store } = cardProps;
+  const queued = () => store.isQueued(cardProps.prompt.id);
+
+  const startEdit = () => {
+    setEditText(cardProps.prompt.text);
+    setEditing(true);
+  };
+
+  const commitEdit = async () => {
+    const ok = await store.editPrompt(cardProps.prompt.id, editText());
+    if (ok) setEditing(false);
+  };
+
+  const cancelEdit = () => setEditing(false);
+
+  const actionBtnStyle = {
+    background: "none",
+    border: "none",
+    color: "#777",
+    cursor: "pointer",
+    padding: "2px 6px",
+    "font-size": "11px",
+    "font-family": "inherit",
+    "border-radius": "4px",
+  };
+
+  return (
+    <div style={{
+      background: "var(--bg-surface)",
+      border: queued() ? "1px solid var(--queued-border)" : "1px solid var(--border)",
+      "border-left": queued() ? "3px solid var(--queued-text)" : "1px solid var(--border)",
+      "border-radius": "10px",
+      padding: "16px",
+      "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
+      transition: "border-color 0.15s ease",
+    }}>
+      <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "8px", "margin-bottom": "10px" }}>
+        <div style={{ display: "flex", "align-items": "center", gap: "10px" }}>
+          <div style={{ "font-size": "11px", color: "var(--text-dim)" }}>
+            {cardProps.formatDate(cardProps.prompt.created_at)}
+          </div>
+          <Show when={!editing()}>
+            <button onClick={startEdit} style={actionBtnStyle} title="Edit">Edit</button>
+            <button onClick={() => void store.duplicatePrompt(cardProps.prompt.id)} style={actionBtnStyle} title="Duplicate">Dup</button>
+            <button
+              onClick={() => void store.deletePrompt(cardProps.prompt.id)}
+              style={{ ...actionBtnStyle, color: "#a55" }}
+              title="Delete"
+            >
+              Del
+            </button>
+          </Show>
+        </div>
+        <button
+          class="btn btn-pill"
+          onClick={() => void store.toggleQueued(cardProps.prompt.id)}
+          disabled={store.syncingQueue()}
+          style={{
+            background: queued() ? "var(--queued-bg)" : "var(--border)",
+            color: queued() ? "var(--queued-text)" : "#9aa3b2",
+            border: queued() ? "1px solid var(--queued-border)" : "1px solid #3a3a3a",
+            padding: "6px 12px",
+            "font-size": "11px",
+            cursor: store.syncingQueue() ? "default" : "pointer",
+            "flex-shrink": "0",
+          }}
+        >
+          {queued()
+            ? `Queued #${store.queuePosition(cardProps.prompt.id) + 1}`
+            : "Add to Queue"}
+        </button>
+      </div>
+
+      <Show
+        when={editing()}
+        fallback={
+          <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
+            {cardProps.prompt.text}
+          </div>
+        }
+      >
+        <textarea
+          value={editText()}
+          onInput={(e) => setEditText(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.metaKey && e.key === "Enter") { e.preventDefault(); void commitEdit(); }
+            if (e.key === "Escape") cancelEdit();
+          }}
+          class="input-field"
+          style={{
+            width: "100%",
+            height: "100px",
+            resize: "vertical",
+            color: cardProps.config.theme.foreground,
+            "border-radius": "var(--radius-md)",
+            padding: "10px",
+            "box-sizing": "border-box",
+            "font-size": "13px",
+            "line-height": "1.6",
+            "margin-bottom": "8px",
+          }}
+        />
+        <div style={{ display: "flex", gap: "8px", "justify-content": "flex-end" }}>
+          <button class="btn btn-secondary" onClick={cancelEdit} style={{ padding: "6px 14px", "font-size": "12px" }}>
+            Cancel
+          </button>
+          <button
+            class="btn"
+            onClick={() => void commitEdit()}
+            disabled={!editText().trim()}
+            style={{ padding: "6px 14px", "font-size": "12px", background: "var(--accent)", color: "#fff" }}
+          >
+            Save
+          </button>
+        </div>
+      </Show>
+    </div>
+  );
+};
 
 const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
   const store = usePromptStackerStore();
@@ -187,8 +322,27 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
           gap: "16px",
           "min-height": "0",
         }}>
-          <div class="section-label" style={{ "font-weight": "600", "letter-spacing": "0.1em" }}>
-            Saved Prompts
+          <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+            <div class="section-label" style={{ "font-weight": "600", "letter-spacing": "0.1em", "flex-shrink": "0" }}>
+              Saved Prompts
+            </div>
+            <Show when={store.prompts().length > 5}>
+              <input
+                type="text"
+                placeholder="Search prompts..."
+                value={store.searchFilter()}
+                onInput={(e) => store.setSearchFilter(e.currentTarget.value)}
+                class="input-field"
+                style={{
+                  flex: "1",
+                  height: "28px",
+                  padding: "0 10px",
+                  "font-size": "12px",
+                  "border-radius": "var(--radius-md)",
+                  color: props.config.theme.foreground,
+                }}
+              />
+            </Show>
           </div>
 
           <Show
@@ -200,49 +354,14 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
             }
           >
             <div style={{ display: "flex", "flex-direction": "column", gap: "12px", overflow: "auto", "padding-right": "8px" }}>
-              <For each={store.prompts()}>
-                {(prompt) => {
-                  const queued = () => store.isQueued(prompt.id);
-                  return (
-                    <div style={{
-                      background: "var(--bg-surface)",
-                      border: queued() ? "1px solid var(--queued-border)" : "1px solid var(--border)",
-                      "border-left": queued() ? "3px solid var(--queued-text)" : "1px solid var(--border)",
-                      "border-radius": "10px",
-                      padding: "16px",
-                      "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
-                      transition: "border-color 0.15s ease",
-                    }}>
-                      <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "12px", "margin-bottom": "10px" }}>
-                        <div style={{ "font-size": "11px", color: "var(--text-dim)" }}>
-                          {formatDate(prompt.created_at)}
-                        </div>
-                        <button
-                          class="btn btn-pill"
-                          onClick={() => void store.toggleQueued(prompt.id)}
-                          disabled={store.syncingQueue()}
-                          style={{
-                            background: queued() ? "var(--queued-bg)" : "var(--border)",
-                            color: queued() ? "var(--queued-text)" : "#9aa3b2",
-                            border: queued() ? "1px solid var(--queued-border)" : "1px solid #3a3a3a",
-                            padding: "6px 12px",
-                            "font-size": "11px",
-                            cursor: store.syncingQueue() ? "default" : "pointer",
-                            "flex-shrink": "0",
-                          }}
-                        >
-                          {queued()
-                            ? `Queued #${store.queuePosition(prompt.id) + 1}`
-                            : "Add to Queue"}
-                        </button>
-                      </div>
-                      <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
-                        {prompt.text}
-                      </div>
-                    </div>
-                  );
-                }}
+              <For each={store.filteredPrompts()}>
+                {(prompt) => <PromptCard prompt={prompt} store={store} formatDate={formatDate} config={props.config} />}
               </For>
+              <Show when={store.searchFilter() && store.filteredPrompts().length === 0}>
+                <div style={{ color: "var(--text-dim)", "font-size": "13px", "text-align": "center", padding: "20px" }}>
+                  No prompts match "{store.searchFilter()}"
+                </div>
+              </Show>
             </div>
           </Show>
         </div>

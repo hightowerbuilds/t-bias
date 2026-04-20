@@ -2,6 +2,9 @@ import { createRoot, createSignal } from "solid-js";
 import {
   GET_PROMPT_STACKER_STATE_CMD,
   SAVE_PROMPT_CMD,
+  EDIT_PROMPT_CMD,
+  DELETE_PROMPT_CMD,
+  DUPLICATE_PROMPT_CMD,
   SET_PROMPT_QUEUE_CMD,
   type PromptRecord,
   type PromptStackerState,
@@ -29,11 +32,20 @@ export interface PromptStackerStore {
   moveInQueue: (promptId: string, delta: number) => Promise<void>;
   /** Return the first queued prompt's text and remove it from the queue. */
   advanceQueue: () => Promise<string | null>;
+  editPrompt: (promptId: string, text: string) => Promise<boolean>;
+  deletePrompt: (promptId: string) => Promise<void>;
+  duplicatePrompt: (promptId: string) => Promise<void>;
+  searchFilter: () => string;
+  setSearchFilter: (value: string) => void;
+  filteredPrompts: () => PromptRecord[];
 }
 
 export interface PromptStackerClient {
   getState: () => Promise<PromptStackerState>;
   savePrompt: (text: string) => Promise<PromptRecord>;
+  editPrompt: (promptId: string, text: string) => Promise<PromptRecord>;
+  deletePrompt: (promptId: string) => Promise<PromptStackerState>;
+  duplicatePrompt: (promptId: string) => Promise<PromptRecord>;
   setQueue: (queue: string[]) => Promise<PromptStackerState>;
 }
 
@@ -48,6 +60,9 @@ function invokeTauri<T>(command: string, args?: Record<string, unknown>) {
 const defaultPromptStackerClient: PromptStackerClient = {
   getState: () => invokeTauri<PromptStackerState>(GET_PROMPT_STACKER_STATE_CMD),
   savePrompt: (text) => invokeTauri<PromptRecord>(SAVE_PROMPT_CMD, { text }),
+  editPrompt: (promptId, text) => invokeTauri<PromptRecord>(EDIT_PROMPT_CMD, { promptId, text }),
+  deletePrompt: (promptId) => invokeTauri<PromptStackerState>(DELETE_PROMPT_CMD, { promptId }),
+  duplicatePrompt: (promptId) => invokeTauri<PromptRecord>(DUPLICATE_PROMPT_CMD, { promptId }),
   setQueue: (queue) => invokeTauri<PromptStackerState>(SET_PROMPT_QUEUE_CMD, { queue }),
 };
 
@@ -61,6 +76,7 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
     const [loading, setLoading] = createSignal(false);
     const [loaded, setLoaded] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
+    const [searchFilter, setSearchFilter] = createSignal("");
 
     const applyState = (state: PromptStackerState) => {
       setPrompts(state.prompts);
@@ -183,6 +199,47 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
         if (!first) return null;
         await persistQueue(ids.slice(1));
         return first.text;
+      },
+      editPrompt: async (promptId: string, text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        try {
+          const updated = await client.editPrompt(promptId, trimmed);
+          setPrompts((current) => current.map((p) => (p.id === updated.id ? updated : p)));
+          return true;
+        } catch (err) {
+          setError(String(err));
+          return false;
+        }
+      },
+      deletePrompt: async (promptId: string) => {
+        try {
+          const state = await client.deletePrompt(promptId);
+          applyState(state);
+        } catch (err) {
+          setError(String(err));
+        }
+      },
+      duplicatePrompt: async (promptId: string) => {
+        try {
+          const dup = await client.duplicatePrompt(promptId);
+          // Insert right after the source prompt in the local list.
+          setPrompts((current) => {
+            const idx = current.findIndex((p) => p.id === promptId);
+            const next = [...current];
+            next.splice(idx + 1, 0, dup);
+            return next;
+          });
+        } catch (err) {
+          setError(String(err));
+        }
+      },
+      searchFilter,
+      setSearchFilter,
+      filteredPrompts: () => {
+        const q = searchFilter().toLowerCase().trim();
+        if (!q) return prompts();
+        return prompts().filter((p) => p.text.toLowerCase().includes(q));
       },
     };
   });

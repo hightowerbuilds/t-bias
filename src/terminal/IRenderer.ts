@@ -60,6 +60,7 @@ export interface TerminalModes {
   readonly mouseAll: boolean;
   readonly isAlternateScreen: boolean;
   readonly focusEvents: boolean;
+  readonly alternateScroll: boolean;
 }
 
 // ---------------------------------------------------------------------------

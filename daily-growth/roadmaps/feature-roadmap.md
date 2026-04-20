@@ -25,8 +25,10 @@ Test against real TUI applications and fix what breaks.
 - [ ] Run nano — basic editing, status line
 - [ ] Run git log/diff with color — verify 256-color and truecolor output
 - [ ] Run ncurses test programs (if available) for systematic coverage
-- [ ] Audit and log all unhandled CSI/ESC/OSC sequences hit during testing
-- [ ] Implement the most-hit unhandled sequences from the audit
+- [x] Audit and log all unhandled CSI/ESC/OSC sequences hit during testing
+- [x] Implement the most-hit unhandled sequences from the audit
+
+Note (2026-04-19): Full parser audit completed. Added: mode 1007 (alternate scroll — wheel sends cursor keys in alt screen for vim/less/htop), mode 1048 (standalone cursor save/restore for tmux), mode 1036 (meta sends ESC), window op 8 (set terminal size — vim), window op 16 (cell size in pixels). Alternate scroll wired into TerminalHost wheel handler. Unhandled CSI and DECSET sequences now log to console.debug in dev builds. SGR coverage verified complete (22/23/24/25/27/28/29 all present).
 
 ### 1.2 Grapheme Cluster Segmentation (UAX #29)
 

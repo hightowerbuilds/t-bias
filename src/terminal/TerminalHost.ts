@@ -836,6 +836,13 @@ export class TerminalHost {
       const row = this.mouseRow(e);
       const button = e.deltaY < 0 ? 64 : 65;
       this.encodeMouse(button, col, row, true);
+    } else if (modes.isAlternateScreen && modes.alternateScroll) {
+      // Alternate scroll mode: translate wheel into cursor up/down keys so
+      // TUI apps (vim, less, htop) receive scroll input on the alt screen.
+      const lines = Math.max(1, Math.min(5, Math.abs(Math.round(e.deltaY / 40))));
+      const key = e.deltaY < 0 ? (modes.applicationCursor ? "\x1bOA" : "\x1b[A")
+                                : (modes.applicationCursor ? "\x1bOB" : "\x1b[B");
+      for (let i = 0; i < lines; i++) this.onData?.(key);
     } else if (!modes.isAlternateScreen) {
       const lines = e.deltaY > 0 ? 3 : -3;
       this.core.scrollViewport(-lines);

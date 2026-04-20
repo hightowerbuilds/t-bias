@@ -281,6 +281,7 @@ export class TerminalCore {
       mouseAll: this.screen.mouseAll,
       isAlternateScreen: this.screen.isAlternateScreen,
       focusEvents: this.screen.focusEvents,
+      alternateScroll: this.screen.alternateScroll,
     };
   }
 

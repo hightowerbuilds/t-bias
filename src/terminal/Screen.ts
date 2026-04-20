@@ -71,6 +71,9 @@ export class Screen implements ParserHandler {
   // Focus events
   focusEvents = false;       // 1004: send focus in/out events
 
+  // Alternate scroll — when set, scroll events in alt screen send cursor keys
+  alternateScroll = false;   // 1007
+
   // Scrollback viewport
   viewportOffset = 0;        // 0 = bottom (live), >0 = scrolled up
 
@@ -88,6 +91,7 @@ export class Screen implements ParserHandler {
   // Callbacks
   onResponse?: (data: string) => void;
   onClipboard?: (data: string) => void;
+  onResizeRequest?: (cols: number, rows: number) => void;
 
   // Last printed character (for REP)
   private lastChar = "";
@@ -399,8 +403,11 @@ export class Screen implements ParserHandler {
       case "t": this.windowOps(params); break;              // Window ops
       case "u": this.restoreCursor(); break;                // SCORC
       default: {
-        const msg = `CSI params=[${params}] inter="${intermediates}" final="${final}"`;
+        const msg = `[t-bias] unhandled CSI params=[${params}] inter="${intermediates}" final="${final}"`;
         ((globalThis as any).__tbias_log ??= []).push(msg);
+        if (typeof console !== "undefined" && (globalThis as any).__TAURI__?.core) {
+          console.debug(msg);
+        }
       }
     }
   }
@@ -826,6 +833,8 @@ export class Screen implements ParserHandler {
       case 1004: return this.focusEvents ? 1 : 2;
       case 1006: return this.mouseSgr ? 1 : 2;
       case 1049: return this.isAltScreen ? 1 : 2;
+      case 1007: return this.alternateScroll ? 1 : 2;
+      case 1048: return 2; // cursor save/restore — stateless query, report as reset
       case 2004: return this.bracketedPaste ? 1 : 2;
       case 2026: return 2; // synchronized output — accepted but always "reset"
       default: return 0; // unknown
@@ -877,7 +886,16 @@ export class Screen implements ParserHandler {
         break;
       case 1005:                                            // UTF-8 mouse encoding (accepted, use SGR instead)
         break;
+      case 1007:                                            // Alternate scroll mode
+        this.alternateScroll = enable;
+        break;
       case 1015:                                            // URXVT mouse encoding (accepted, use SGR instead)
+        break;
+      case 1036:                                            // Meta sends ESC (accepted, default behavior)
+        break;
+      case 1048:                                            // Save/restore cursor (standalone)
+        if (enable) this.saveCursor();
+        else this.restoreCursor();
         break;
       case 2026:                                            // Synchronized output (no-op, accepted)
         break;
@@ -895,8 +913,11 @@ export class Screen implements ParserHandler {
         this.bracketedPaste = enable;
         break;
       default: {
-        const msg = `DECSET mode=${mode} enable=${enable}`;
+        const msg = `[t-bias] unhandled DECSET mode=${mode} enable=${enable}`;
         ((globalThis as any).__tbias_log ??= []).push(msg);
+        if (typeof console !== "undefined" && (globalThis as any).__TAURI__?.core) {
+          console.debug(msg);
+        }
       }
     }
   }
@@ -948,12 +969,22 @@ export class Screen implements ParserHandler {
   // ========================================================================
   private windowOps(params: number[]) {
     switch (params[0]) {
+      case 8: {
+        // Set text area size in characters — vim sends this.
+        // We report our actual size; the resize is handled by the host.
+        const reqRows = params[1] || this.rows;
+        const reqCols = params[2] || this.cols;
+        this.onResizeRequest?.(reqCols, reqRows);
+        break;
+      }
       case 11: // Report window state — always report as non-iconified
         this.onResponse?.("\x1b[1t");
         break;
       case 14: // Report window size in pixels — approximate from grid
-        // Actual pixel size depends on renderer; report best estimate
         this.onResponse?.(`\x1b[4;${this.rows * 16};${this.cols * 8}t`);
+        break;
+      case 16: // Report cell size in pixels
+        this.onResponse?.("\x1b[6;16;8t");
         break;
       case 18: // Report terminal size in characters
         this.onResponse?.(`\x1b[8;${this.rows};${this.cols}t`);

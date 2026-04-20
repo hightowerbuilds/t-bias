@@ -162,6 +162,11 @@ export function sessionDataToWorkspace(
   data: SessionData,
   newId: () => number,
 ): { tabs: SessionTabState[]; activeTabIndex: number } {
+  // Version guard — reject unknown formats rather than silently corrupting state.
+  // When a future version bumps the format, add migration logic here.
+  if (data.version !== 1) {
+    return { tabs: [], activeTabIndex: 0 };
+  }
   const tabs = data.tabs.map((t) => savedTabToTabState(t, newId));
   const activeTabIndex = Math.min(
     Math.max(0, data.activeTabIndex),

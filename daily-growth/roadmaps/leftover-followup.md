@@ -44,25 +44,25 @@ Collected from Terminal Trust Hardening, Prompt Queue, and Feature Roadmaps (202
 ## Documentation
 
 ### Input Limitations
-- [ ] Document what input modes are supported
+- [x] Document what input modes are supported
 - [ ] Remove composition warning only once support is verified reliable
 
 ### User-Facing Honesty
-- [ ] Make sure README and product copy do not overstate session behavior
-- [ ] Make sure close behavior is discoverable
-- [ ] Make sure limitations are stated where they matter
+- [x] Make sure README and product copy do not overstate session behavior
+- [x] Make sure close behavior is discoverable
+- [x] Make sure limitations are stated where they matter
 
 ### Prompt Queue
-- [ ] Document queue behavior in the README once stable
+- [x] Document queue behavior in the README once stable
 
 ---
 
 ## Minor Code Items
 
 ### Session
-- [ ] Ensure session landing UI reflects what is actually restored (layout vs shell records)
-- [ ] Handle deleted files and moved directories gracefully (editor panes with missing files)
-- [ ] Add migration rules for older session file formats
+- [x] Ensure session landing UI reflects what is actually restored (layout vs shell records)
+- [x] Handle deleted files and moved directories gracefully (editor panes with missing files)
+- [x] Add migration rules for older session file formats
 
 ### Config System
 - [ ] Hot-reload: watch config file and apply changes without restart

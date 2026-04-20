@@ -38,13 +38,13 @@ export const ShellLanding: Component<{
             <div style={{ "font-size": "14px", color: "var(--text-muted)" }}>t-bias</div>
             <div style={{ "font-size": "18px", color: "var(--text-bright)", "margin-top": "8px" }}>Shell Registry</div>
             <div style={{ "font-size": "12px", color: "var(--text-sublabel)", "margin-top": "6px", "line-height": "1.6" }}>
-              Every shell opened in t-bias is tracked here. Restore persisted shells, reopen older ones, or mark specific shells to survive app quits.
+              Restore your previous workspace layout (tabs, splits, and working directories) or start fresh. Individual shells are listed below.
             </div>
           </div>
           <div style={{ display: "flex", "align-items": "center", gap: "8px", "flex-wrap": "wrap", "justify-content": "flex-end" }}>
             <Show when={props.records.some(isRestorableShell)}>
               <button class="btn btn-primary" style={{ padding: "9px 14px" }} onClick={props.onRestoreAll}>
-                Restore Persisted
+                Restore Last Session
               </button>
             </Show>
             <button class="btn btn-secondary" style={{ padding: "9px 14px" }} onClick={props.onNewShell}>

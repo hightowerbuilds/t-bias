@@ -1,46 +1,87 @@
 # t-bias
 
-t-bias is a native desktop terminal emulator built with Tauri, Rust, SolidJS, and a custom canvas renderer. It runs a real shell, uses a custom VT parser and screen model, and does not depend on `xterm.js` or other terminal emulation libraries.
+A native desktop terminal emulator built with Tauri, Rust, SolidJS, and a fully custom canvas renderer. No xterm.js — the VT parser, screen model, glyph atlas, and rendering pipeline are all built from scratch.
 
-## What It Does
+## Features
 
-- Runs a real PTY-backed shell
-- Renders terminal output to canvas with a custom glyph atlas
-- Supports tabs and split panes
-- Persists sessions and named workspaces
-- Tracks the terminal working directory for new tabs and explorer views
-- Detects foreground CLI tools and uses them for tab titles when appropriate
-- Supports scrollback, selection, copy, paste, zoom, and resize
-- Supports truecolor, alternate screen, mouse tracking, bracketed paste, and OSC 8 hyperlinks
-- Includes a flip-side file explorer for terminal panes
-- Opens files in a built-in editor tab
-- Renders markdown files in a styled `Blog MD` preview
-- Includes Prompt Stacker for saving reusable prompts
+**Terminal**
+- Real PTY-backed shell with full VT500 escape sequence support
+- Canvas rendering with a glyph atlas (dirty-row tracking, sub-row invalidation)
+- Truecolor, 256-color, alternate screen, mouse tracking (SGR), bracketed paste
+- Grapheme cluster segmentation (emoji, CJK, combining characters) via Intl.Segmenter
+- Reflow on resize — soft-wrapped lines merge/split correctly
+- Scrollback with search (Cmd+F, regex, case toggle)
+- OSC 8 hyperlinks + auto-detected URL hover/click
+- OSC 52 clipboard read/write
+- OSC 133 shell integration (Cmd+Up/Down prompt jumping, exit status indicators)
+- OSC 7 working directory tracking
 
-## Configuration
+**Workspace**
+- Tabs (Cmd+T, Cmd+W, Cmd+1-9, Cmd+Shift+[/])
+- Split panes (Cmd+D horizontal, Cmd+Shift+D vertical, Cmd+Option+Arrow nav)
+- Zoom pane (Cmd+Shift+Enter)
+- Session persistence — full workspace layout auto-saves on quit and restores on launch
+- Named sessions via shell registry
+- Close confirmation when processes are running
+- Foreground process detection for tab titles
 
-t-bias reads its config from the platform config directory.
+**Tools**
+- Flip Explorer — terminal panes flip to reveal a file explorer (Cmd+/)
+- Built-in code editor with canvas renderer and regex tokenizer
+- Markdown preview (Blog MD) for .md files
+- Prompt Stacker — save, edit, delete, duplicate, search, and queue reusable prompts
+- Prompt Queue footer bar — copy or send prompts directly to the active shell (Cmd+Shift+Q to advance)
 
-Example on macOS:
+**Configuration**
+- TOML config at `~/.config/tbias/config.toml`
+- Font, theme (16 ANSI colors), cursor style, scrollback limit, shell, padding
+- Built-in theme presets: Dracula, Solarized Dark, One Dark, Catppuccin Mocha
+- See [config.example.toml](config.example.toml) for all options
 
-```text
-~/Library/Application Support/tbias/config.toml
-```
+## Keyboard Shortcuts
 
-See [config.example.toml](config.example.toml) for available options.
+| Shortcut | Action |
+|----------|--------|
+| Cmd+T | New tab |
+| Cmd+W | Close pane/tab |
+| Cmd+D | Split horizontal |
+| Cmd+Shift+D | Split vertical |
+| Cmd+Option+Arrow | Navigate panes |
+| Cmd+Shift+Enter | Toggle zoom |
+| Cmd+1-9 | Switch to tab |
+| Cmd+Shift+[/] | Cycle tabs |
+| Cmd+/ | Flip explorer |
+| Cmd+F | Search in scrollback |
+| Cmd+Up/Down | Jump between prompts |
+| Cmd+Shift+Q | Advance prompt queue |
+| Cmd+C | Copy selection |
+| Cmd+V | Paste |
+| Cmd++/- | Zoom in/out |
+| Cmd+0 | Reset zoom |
+
+## Known Limitations
+
+- macOS only (Windows/Linux builds not yet verified)
+- No image protocol support (Kitty, Sixel, iTerm2)
+- No font fallback chain (missing glyphs render as blank)
+- No ligature support
+- Scrollback reflow not yet implemented (only active screen reflows)
+- IME composition works but has not been tested with CJK input methods
+- No screen reader / accessibility support
 
 ## Development
 
 ```bash
 bun install
-bun run test
+bun run test        # 115 frontend + 8 Rust tests
 bun run build
 cargo tauri dev
 ```
 
-For a backend-only verification pass:
+Backend-only check:
 
 ```bash
 cd src-tauri
 cargo check
+cargo test
 ```

@@ -1089,16 +1089,34 @@ export class TerminalHost {
   }
 
   private autoDetectUrlAt(screenRow: number, col: number): { url: string; startCol: number; endCol: number } | null {
-    const rowText = this.core.virtualCanvas.getActiveRowText(screenRow);
+    const vc = this.core.virtualCanvas;
+
+    // Join the current row with any adjacent soft-wrapped rows so URLs that
+    // wrap across visual lines are still detected as a single URL.
+    let firstRow = screenRow;
+    while (firstRow > 0 && vc.isSoftWrapped(firstRow)) firstRow--;
+    let lastRow = screenRow;
+    while (lastRow + 1 < this.rows && vc.isSoftWrapped(lastRow + 1)) lastRow++;
+
+    let joinedText = "";
+    for (let r = firstRow; r <= lastRow; r++) {
+      joinedText += vc.getActiveRowText(r);
+    }
+
+    // Offset of the hovered cell within the joined string
+    const absCol = (screenRow - firstRow) * this.cols + col;
+
     const re = /https?:\/\/[^\s\x00-\x1f\x7f"<>{}|\\^`[\]]+/g;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(rowText)) !== null) {
-      // Trim trailing punctuation that commonly trails URLs
+    while ((m = re.exec(joinedText)) !== null) {
       const url = m[0].replace(/[.,;:!?()'"]+$/, "");
-      const startCol = m.index;
-      const endCol = startCol + url.length;
-      if (col >= startCol && col < endCol) {
-        return { url, startCol, endCol };
+      const startAbs = m.index;
+      const endAbs = startAbs + url.length;
+      if (absCol >= startAbs && absCol < endAbs) {
+        // Map back to screen-row-local columns for the hovered row
+        const startCol = startAbs - (screenRow - firstRow) * this.cols;
+        const endCol = endAbs - (screenRow - firstRow) * this.cols;
+        return { url, startCol: Math.max(0, startCol), endCol: Math.min(this.cols, endCol) };
       }
     }
     return null;

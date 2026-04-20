@@ -98,6 +98,8 @@ export class VirtualCanvas {
 
   // OSC 133 prompt marks — one byte per physical row / scrollback slot
   private sbPromptMark: Uint8Array;     // indexed by scrollback slot
+  // Soft-wrap tracking for scrollback rows (1 = continuation of previous row)
+  private sbSoftWrapped: Uint8Array;
   private activePromptMark: Uint8Array; // indexed by physical row
 
   constructor(cols: number, rows: number, scrollbackLimit = 5000) {
@@ -134,6 +136,7 @@ export class VirtualCanvas {
 
     // Prompt marks (one byte per slot / physical row)
     this.sbPromptMark = new Uint8Array(scrollbackLimit);
+    this.sbSoftWrapped = new Uint8Array(scrollbackLimit);
     this.activePromptMark = new Uint8Array(this.physRows);
 
     // Allocate scrollback ring buffer (4.2: Uint16Array for attrs, no ulColor)
@@ -634,6 +637,7 @@ export class VirtualCanvas {
     this.softWrapped.fill(0);
     this.sbHead = 0;
     this.sbCount = 0;
+    this.sbSoftWrapped.fill(0);
     this.isAlt = false;
     this.activePage = this.mainPage;
     this.activeRowMap = this.mainRowMap;
@@ -684,8 +688,9 @@ export class VirtualCanvas {
       }
     }
 
-    // Copy prompt mark for this row to the scrollback slot
+    // Copy prompt mark and soft-wrap flag for this row to the scrollback slot
     this.sbPromptMark[slot] = this.activePromptMark[physRow];
+    this.sbSoftWrapped[slot] = this.softWrapped[physRow];
 
     if (this.sbCount < this.scrollbackLimit) {
       this.sbCount++;
@@ -964,8 +969,10 @@ export class VirtualCanvas {
       this.markAllDirty();
     }
 
-    // If cols changed, reallocate the scrollback ring buffer
-    // (existing scrollback content is lost — same behavior as before)
+    // If cols changed, reallocate the scrollback ring buffer.
+    // Scrollback content is lost on col change — reflow of scrollback would
+    // require reconstructing logical lines from the ring buffer, which is
+    // tracked via sbSoftWrapped but not yet implemented for the ring itself.
     if (newCols !== this.sbCols) {
       this.sbCols = newCols;
       const sbSize = this.scrollbackLimit * newCols;
@@ -976,6 +983,7 @@ export class VirtualCanvas {
       this.sbHead = 0;
       this.sbCount = 0;
       this.sbPromptMark.fill(0);
+      this.sbSoftWrapped.fill(0);
     }
   }
 

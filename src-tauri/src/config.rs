@@ -116,7 +116,49 @@ pub struct Config {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub shells: ShellsConfig,
+    #[serde(default)]
+    pub keybindings: KeybindingsConfig,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeybindingsConfig {
+    #[serde(default = "default_kb_new_tab")]
+    pub new_tab: String,
+    #[serde(default = "default_kb_close")]
+    pub close: String,
+    #[serde(default = "default_kb_split_h")]
+    pub split_horizontal: String,
+    #[serde(default = "default_kb_split_v")]
+    pub split_vertical: String,
+    #[serde(default = "default_kb_zoom")]
+    pub zoom: String,
+    #[serde(default = "default_kb_flip")]
+    pub flip: String,
+    #[serde(default = "default_kb_advance_queue")]
+    pub advance_queue: String,
+}
+
+impl Default for KeybindingsConfig {
+    fn default() -> Self {
+        Self {
+            new_tab: default_kb_new_tab(),
+            close: default_kb_close(),
+            split_horizontal: default_kb_split_h(),
+            split_vertical: default_kb_split_v(),
+            zoom: default_kb_zoom(),
+            flip: default_kb_flip(),
+            advance_queue: default_kb_advance_queue(),
+        }
+    }
+}
+
+fn default_kb_new_tab() -> String { "Cmd+T".to_string() }
+fn default_kb_close() -> String { "Cmd+W".to_string() }
+fn default_kb_split_h() -> String { "Cmd+D".to_string() }
+fn default_kb_split_v() -> String { "Cmd+Shift+D".to_string() }
+fn default_kb_zoom() -> String { "Cmd+Shift+Enter".to_string() }
+fn default_kb_flip() -> String { "Cmd+/".to_string() }
+fn default_kb_advance_queue() -> String { "Cmd+Shift+Q".to_string() }
 
 impl Default for Config {
     fn default() -> Self {
@@ -129,6 +171,7 @@ impl Default for Config {
             opacity: default_opacity(),
             theme: ThemeConfig::default(),
             shells: ShellsConfig::default(),
+            keybindings: KeybindingsConfig::default(),
         }
     }
 }

@@ -76,6 +76,16 @@ export interface ConfigShells {
   persist_on_quit: boolean;
 }
 
+export interface ConfigKeybindings {
+  new_tab: string;
+  close: string;
+  split_horizontal: string;
+  split_vertical: string;
+  zoom: string;
+  flip: string;
+  advance_queue: string;
+}
+
 export interface AppConfig {
   font: ConfigFont;
   scrollback_limit: number;
@@ -85,6 +95,7 @@ export interface AppConfig {
   opacity: number;
   theme: ConfigTheme;
   shells: ConfigShells;
+  keybindings: ConfigKeybindings;
 }
 
 // ========================== Filesystem ==========================

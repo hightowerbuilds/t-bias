@@ -475,6 +475,23 @@ const App: Component = () => {
   // Keyboard
   // ---------------------------------------------------------------------------
 
+  /** Match a KeyboardEvent against a keybinding string like "Cmd+Shift+D". */
+  const matchKb = (e: KeyboardEvent, binding: string): boolean => {
+    const parts = binding.toLowerCase().split("+");
+    const wantMeta = parts.includes("cmd") || parts.includes("meta");
+    const wantShift = parts.includes("shift");
+    const wantAlt = parts.includes("alt") || parts.includes("option");
+    const wantCtrl = parts.includes("ctrl");
+    const keyPart = parts.filter(p => !["cmd","meta","shift","alt","option","ctrl"].includes(p))[0] ?? "";
+    if (wantMeta !== e.metaKey) return false;
+    if (wantShift !== e.shiftKey) return false;
+    if (wantAlt !== e.altKey) return false;
+    if (wantCtrl !== e.ctrlKey) return false;
+    if (keyPart === "enter") return e.key === "Enter";
+    if (keyPart === "/") return e.key === "/";
+    return e.key.toLowerCase() === keyPart;
+  };
+
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
     if (promptStackerOpen()) {
       if (e.key === "Escape") { e.preventDefault(); setPromptStackerOpen(false); }
@@ -485,23 +502,23 @@ const App: Component = () => {
       return;
     }
     if (!appReady() || !e.metaKey) return;
-    const key = e.key.toLowerCase();
+    const kb = config()!.keybindings;
 
-    if (key === "t" && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void addTab(); return; }
-    if (key === "w" && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void closeActivePane(); return; }
-    if (key === "d" && !e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); splitActivePane("h"); return; }
-    if (key === "d" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); splitActivePane("v"); return; }
-    if (e.key === "Enter" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); toggleZoom(); return; }
-    if (e.key === "/" && !e.shiftKey && !e.altKey) {
+    if (matchKb(e, kb.new_tab)) { e.preventDefault(); e.stopPropagation(); void addTab(); return; }
+    if (matchKb(e, kb.close)) { e.preventDefault(); e.stopPropagation(); void closeActivePane(); return; }
+    if (matchKb(e, kb.split_horizontal)) { e.preventDefault(); e.stopPropagation(); splitActivePane("h"); return; }
+    if (matchKb(e, kb.split_vertical)) { e.preventDefault(); e.stopPropagation(); splitActivePane("v"); return; }
+    if (matchKb(e, kb.zoom)) { e.preventDefault(); e.stopPropagation(); toggleZoom(); return; }
+    if (matchKb(e, kb.flip)) {
       e.preventDefault(); e.stopPropagation();
       const currentTab = tab();
       if (currentTab) toggleFlipPane(currentTab.activePaneId);
       return;
     }
+    const key = e.key.toLowerCase();
     if (key === "e" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void addFileExplorerTab(); return; }
 
-    // Cmd+Shift+Q: advance queue — copy next queued prompt and send to active shell
-    if (key === "q" && e.shiftKey && !e.altKey) {
+    if (matchKb(e, kb.advance_queue)) {
       e.preventDefault(); e.stopPropagation();
       const queueStore = usePromptStackerStore();
       void (async () => {

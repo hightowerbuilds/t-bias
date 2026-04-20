@@ -65,20 +65,20 @@ Collected from Terminal Trust Hardening, Prompt Queue, and Feature Roadmaps (202
 - [x] Add migration rules for older session file formats
 
 ### Config System
-- [ ] Hot-reload: watch config file and apply changes without restart
-- [ ] Custom keybindings in config
-- [ ] Window opacity setting
-- [ ] CLI flag to specify config path (`--config`)
+- [x] Hot-reload: watch config file and apply changes without restart
+- [x] Custom keybindings in config
+- [x] Window opacity setting
+- [x] CLI flag to specify config path (`--config`)
 
 ### URL Detection
-- [ ] Handle URL wrapping across multiple lines
+- [x] Handle URL wrapping across multiple lines
 
 ### Reflow
-- [ ] Handle reflow in scrollback (soft-wrapped rows in history should rejoin)
+- [x] Scrollback soft-wrap tracking added (sbSoftWrapped); ring buffer reflow deferred
 
 ### Prompt Library
 - [ ] Tags, folders, or lightweight categories for prompts
-- [ ] Import/export for prompt libraries
+- [x] Import/export for prompt libraries
 
 ### Backend/PTY Test Coverage (needs Tauri runtime)
 - [ ] Add tests for shell spawn failure and recovery

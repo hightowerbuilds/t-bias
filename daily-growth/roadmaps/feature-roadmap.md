@@ -84,73 +84,65 @@ Features that make the terminal pleasant to use, not just functional.
 
 ### 2.1 Configuration System
 
-No settings are user-configurable today. Everything is hardcoded.
-
-- [ ] Define a config file format (TOML, JSON, or YAML) and default location (`~/.config/tbias/config.toml` or similar)
-- [ ] Configurable options:
-  - [ ] Font family and size
-  - [ ] Theme (background, foreground, cursor, selection, ANSI palette — all 16 colors)
-  - [ ] Scrollback limit
-  - [ ] Cursor style (block/underline/bar) and blink on/off
-  - [ ] Shell command (override default shell)
-  - [ ] Padding / margin around the terminal grid
+- [x] Define a config file format (TOML) and default location (`~/.config/tbias/config.toml`)
+- [x] Configurable options:
+  - [x] Font family and size
+  - [x] Theme (background, foreground, cursor, selection, ANSI palette — all 16 colors)
+  - [x] Scrollback limit
+  - [x] Cursor style (block/underline/bar) and blink on/off
+  - [x] Shell command (override default shell)
+  - [x] Padding / margin around the terminal grid
   - [ ] Window opacity
   - [ ] Keybindings (at minimum: copy, paste, zoom, new tab, close tab)
 - [ ] Hot-reload: watch the config file and apply changes without restart
-- [ ] Ship sensible defaults that work out of the box
-- [ ] Support popular theme formats or provide a few built-in themes (Dracula, Solarized, One Dark, Catppuccin)
+- [x] Ship sensible defaults that work out of the box
+- [x] Support popular theme formats or provide a few built-in themes (Dracula, Solarized, One Dark, Catppuccin)
 - [ ] CLI flag to specify config path (`--config`)
 
-### 2.2 Search in Scrollback
+Note: TOML config with serde defaults has been shipping since early builds. Partial configs supported — missing fields get sensible defaults.
 
-No way to find text in terminal history.
+### 2.2 Search in Scrollback — COMPLETE
 
-- [ ] Cmd+F opens a search bar (overlay at top or bottom of terminal)
-- [ ] Incremental search: highlight matches as the user types
-- [ ] Navigate matches with Enter (next) and Shift+Enter (previous)
-- [ ] Highlight all matches in the visible viewport + scrollback
-- [ ] Scroll to match when navigating to a match outside the viewport
-- [ ] Regex support (toggle via button or prefix)
-- [ ] Case sensitivity toggle
-- [ ] ESC or Cmd+F again closes the search bar
-- [ ] Search scope: active buffer + scrollback (not alt screen history)
+- [x] Cmd+F opens a search bar (overlay at top of terminal)
+- [x] Incremental search: highlight matches as the user types (debounced 80ms)
+- [x] Navigate matches with Enter (next) and Shift+Enter (previous)
+- [x] Highlight all matches in the visible viewport + scrollback (yellow = current, brown = other)
+- [x] Scroll to match when navigating to a match outside the viewport
+- [x] Regex support (toggle via .* button)
+- [x] Case sensitivity toggle (Aa button)
+- [x] ESC or Cmd+F again closes the search bar
+- [x] Search scope: active buffer + scrollback (not alt screen history)
 
-### 2.3 URL Detection and Hyperlinks
+### 2.3 URL Detection and Hyperlinks — COMPLETE
 
-No clickable URLs. OSC 8 hyperlinks not supported.
-
-- [ ] **OSC 8 hyperlinks**: Parse `ESC ] 8 ; params ; uri ST` sequences, store URI per cell range
-- [ ] Render hyperlinked text with underline (or configurable style)
-- [ ] Cmd+Click on a hyperlink opens it in the default browser
-- [ ] **Auto-detect URLs**: Regex scan visible text for `https?://`, `file://`, etc.
-- [ ] Underline detected URLs on hover (mouse cursor changes to pointer)
-- [ ] Cmd+Click on auto-detected URLs opens them
-- [ ] Right-click on a URL offers "Copy Link" in context menu
+- [x] **OSC 8 hyperlinks**: Parse `ESC ] 8 ; params ; uri ST` sequences, store URI per cell via URL ID
+- [x] Render hyperlinked text with underline
+- [x] Cmd+Click on a hyperlink opens it in the default browser
+- [x] **Auto-detect URLs**: Regex scan visible text for `https?://`
+- [x] Underline detected URLs on hover (mouse cursor changes to pointer)
+- [x] Cmd+Click on auto-detected URLs opens them
+- [x] Right-click on a URL offers "Copy Link" and "Open Link" in context menu
 - [ ] Handle URL wrapping across multiple lines
 
-### 2.4 Shell Integration (OSC 133)
+### 2.4 Shell Integration (OSC 133) — COMPLETE
 
-Enables prompt-aware features (jump between prompts, re-run commands).
-
-- [ ] Parse OSC 133 sequences: prompt start (A), command start (B), command end (C), command finished (D)
-- [ ] Mark prompt boundaries in scrollback
-- [ ] Cmd+Up/Down to jump between prompts in scrollback
-- [ ] Visual indicator for command exit status (success/failure) if the shell reports it
+- [x] Parse OSC 133 sequences: prompt start (A), command start (B), command end (C), command finished (D)
+- [x] Mark prompt boundaries in scrollback
+- [x] Cmd+Up/Down to jump between prompts in scrollback
+- [x] Visual indicator for command exit status (success/failure — green/red left-edge bars)
 - [ ] Foundation for future "re-run last command" or "copy last output" features
 
-### 2.5 Context Menu
+### 2.5 Context Menu — COMPLETE
 
-No right-click menu.
-
-- [ ] Right-click shows a context menu with:
-  - [ ] Copy (if selection active)
-  - [ ] Paste
-  - [ ] Select All
-  - [ ] Copy Link (if right-clicked on a URL)
-  - [ ] Search (opens search bar with selected text)
-  - [ ] Clear Scrollback
-- [ ] Style the menu to match the terminal theme
-- [ ] Keyboard-dismiss with ESC
+- [x] Right-click shows a context menu with:
+  - [x] Copy (if selection active)
+  - [x] Paste
+  - [x] Select All
+  - [x] Copy Link (if right-clicked on a URL)
+  - [x] Search (opens search bar with selected text)
+  - [x] Clear Scrollback
+- [x] Style the menu to match the terminal theme
+- [x] Keyboard-dismiss with ESC
 
 ---
 

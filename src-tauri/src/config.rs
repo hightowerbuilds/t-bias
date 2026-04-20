@@ -41,6 +41,11 @@ impl Default for CursorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeConfig {
+    /// Optional preset name: "dark" (default), "dracula", "solarized-dark",
+    /// "one-dark", "catppuccin-mocha". When set, overrides individual color
+    /// fields that are not explicitly specified.
+    #[serde(default)]
+    pub preset: Option<String>,
     #[serde(default = "default_background")]
     pub background: String,
     #[serde(default = "default_foreground")]
@@ -56,6 +61,7 @@ pub struct ThemeConfig {
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
+            preset: None,
             background: default_background(),
             foreground: default_foreground(),
             cursor: default_cursor_color(),
@@ -181,6 +187,64 @@ fn default_ansi() -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Built-in theme presets
+// ---------------------------------------------------------------------------
+
+fn apply_theme_preset(theme: &mut ThemeConfig) {
+    let preset = match theme.preset.as_deref() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let (bg, fg, cursor, sel, ansi) = match preset {
+        "dracula" => (
+            "#282a36", "#f8f8f2", "#f8f8f2", "#44475a",
+            vec![
+                "#21222c", "#ff5555", "#50fa7b", "#f1fa8c",
+                "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+                "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5",
+                "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
+            ],
+        ),
+        "solarized-dark" => (
+            "#002b36", "#839496", "#839496", "#073642",
+            vec![
+                "#073642", "#dc322f", "#859900", "#b58900",
+                "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+                "#002b36", "#cb4b16", "#586e75", "#657b83",
+                "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+            ],
+        ),
+        "one-dark" => (
+            "#282c34", "#abb2bf", "#528bff", "#3e4451",
+            vec![
+                "#282c34", "#e06c75", "#98c379", "#e5c07b",
+                "#61afef", "#c678dd", "#56b6c2", "#abb2bf",
+                "#545862", "#e06c75", "#98c379", "#e5c07b",
+                "#61afef", "#c678dd", "#56b6c2", "#c8ccd4",
+            ],
+        ),
+        "catppuccin-mocha" => (
+            "#1e1e2e", "#cdd6f4", "#f5e0dc", "#585b70",
+            vec![
+                "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af",
+                "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
+                "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af",
+                "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
+            ],
+        ),
+        _ => return, // unknown preset — keep user-specified colors
+    };
+
+    // Only override fields that are still at their default values.
+    if theme.background == default_background() { theme.background = bg.to_string(); }
+    if theme.foreground == default_foreground() { theme.foreground = fg.to_string(); }
+    if theme.cursor == default_cursor_color() { theme.cursor = cursor.to_string(); }
+    if theme.selection_bg == default_selection_bg() { theme.selection_bg = sel.to_string(); }
+    if theme.ansi == default_ansi() { theme.ansi = ansi.into_iter().map(|s| s.to_string()).collect(); }
+}
+
+// ---------------------------------------------------------------------------
 // Config file path
 // ---------------------------------------------------------------------------
 
@@ -212,8 +276,9 @@ pub fn load_config() -> Config {
 
     match std::fs::read_to_string(&path) {
         Ok(contents) => match toml::from_str::<Config>(&contents) {
-            Ok(config) => {
+            Ok(mut config) => {
                 log::info!("Loaded config from {}", path.display());
+                apply_theme_preset(&mut config.theme);
                 config
             }
             Err(e) => {

@@ -173,6 +173,32 @@ describe("prompt-stacker-store", () => {
     expect(client.setQueue).toHaveBeenCalledWith(["b", "a", "c"]);
   });
 
+  it("advances the queue: returns first item text and removes it", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second"), makePrompt("c", "Third")],
+      queue: ["a", "b", "c"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    const text = await store.advanceQueue();
+
+    expect(text).toBe("First");
+    expect(client.setQueue).toHaveBeenCalledWith(["b", "c"]);
+    expect(store.queueIds()).toEqual(["b", "c"]);
+  });
+
+  it("advanceQueue returns null on empty queue", async () => {
+    const client = makeClient({ prompts: [], queue: [] });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    const text = await store.advanceQueue();
+
+    expect(text).toBeNull();
+    expect(client.setQueue).not.toHaveBeenCalled();
+  });
+
   it("does not move past queue boundaries", async () => {
     const client = makeClient({
       prompts: [makePrompt("a", "First"), makePrompt("b", "Second")],

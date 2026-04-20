@@ -27,6 +27,8 @@ export interface PromptStackerStore {
   removeFromQueue: (promptId: string) => Promise<void>;
   clearQueue: () => Promise<void>;
   moveInQueue: (promptId: string, delta: number) => Promise<void>;
+  /** Return the first queued prompt's text and remove it from the queue. */
+  advanceQueue: () => Promise<string | null>;
 }
 
 export interface PromptStackerClient {
@@ -172,6 +174,15 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
         next[idx] = current[target];
         next[target] = promptId;
         await persistQueue(next);
+      },
+      advanceQueue: async () => {
+        const ids = queueIds();
+        if (ids.length === 0) return null;
+        const promptMap = new Map(prompts().map((p) => [p.id, p] as const));
+        const first = promptMap.get(ids[0]);
+        if (!first) return null;
+        await persistQueue(ids.slice(1));
+        return first.text;
       },
     };
   });

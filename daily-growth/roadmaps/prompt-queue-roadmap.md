@@ -55,12 +55,14 @@ Note (2026-04-19): Footer pills now have inline × remove buttons, ◂/▸ reord
 
 Reduce the gap between “copied to clipboard” and “used in the terminal.”
 
-- [ ] Decide whether click should only copy or optionally paste into the active terminal
-- [ ] Add a secondary action for "send to shell" if direct injection is supported
-- [ ] Add a "copy next" / "advance queue" workflow for stepwise prompt execution
-- [ ] Add queue shortcuts from the shell view
-- [ ] Decide whether queue state is global across tabs or scoped per workspace/session
-- [ ] Make queue behavior explicit when the active tab is not a terminal
+- [x] Decide whether click should only copy or optionally paste into the active terminal
+- [x] Add a secondary action for “send to shell” if direct injection is supported
+- [x] Add a “copy next” / “advance queue” workflow for stepwise prompt execution
+- [x] Add queue shortcuts from the shell view
+- [x] Decide whether queue state is global across tabs or scoped per workspace/session
+- [x] Make queue behavior explicit when the active tab is not a terminal
+
+Note (2026-04-19): Click copies to clipboard; Shift+click sends directly to the active terminal's PTY via write_to_pty. Cmd+Shift+Q advances the queue (pops first item, sends to shell or copies if not in a terminal). Queue is global across tabs. Footer shows “Click to copy, Shift+click to send to shell” tooltip when a terminal is active. “Sent” feedback (blue) is distinct from “Copied” feedback (green). Store gained `advanceQueue()`. 98 tests passing.
 
 **Exit criteria:** the queue supports an actual repeated shell workflow, not just storage plus copy.
 

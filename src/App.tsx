@@ -10,6 +10,7 @@ import { createStore, produce } from "solid-js/store";
 import { PanesRoot } from "./Panes";
 import PromptStackerView from "./PromptStacker";
 import PromptQueueFooter from "./PromptQueueFooter";
+import { usePromptStackerStore } from "./promptStackerStore";
 import { TabBar } from "./TabBar";
 import { ShellLanding } from "./ShellLanding";
 import { CloseConfirmDialog, type PendingClose } from "./CloseConfirmDialog";
@@ -26,6 +27,7 @@ import type { SplitPane, EditorPane, TerminalPane } from "./pane-tree";
 import {
   CLOSE_PANE_CMD,
   GET_CONFIG_CMD,
+  WRITE_TO_PTY_CMD,
   SAVE_SESSION_CMD,
   LOAD_SESSION_CMD,
   PREPARE_SHELL_REGISTRY_FOR_LAUNCH_CMD,
@@ -498,6 +500,23 @@ const App: Component = () => {
     }
     if (key === "e" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void addFileExplorerTab(); return; }
 
+    // Cmd+Shift+Q: advance queue — copy next queued prompt and send to active shell
+    if (key === "q" && e.shiftKey && !e.altKey) {
+      e.preventDefault(); e.stopPropagation();
+      const queueStore = usePromptStackerStore();
+      void (async () => {
+        const text = await queueStore.advanceQueue();
+        if (!text) return;
+        const currentTab = tab();
+        if (currentTab && currentTab.panes[currentTab.activePaneId]?.type === "terminal") {
+          await invoke(WRITE_TO_PTY_CMD, { paneId: currentTab.activePaneId, data: text }).catch(() => {});
+        } else {
+          await navigator.clipboard.writeText(text).catch(() => {});
+        }
+      })();
+      return;
+    }
+
     const digit = parseInt(e.key, 10);
     if (!Number.isNaN(digit) && digit >= 1 && digit <= 9 && !e.shiftKey && !e.altKey) {
       if (digit - 1 < tabs.length) { e.preventDefault(); e.stopPropagation(); setActiveTabId(tabs[digit - 1].id); }
@@ -677,7 +696,11 @@ const App: Component = () => {
           </For>
         </div>
 
-        <PromptQueueFooter config={config()!} />
+        <PromptQueueFooter
+          config={config()!}
+          activePaneId={tab()?.activePaneId}
+          activeIsTerminal={tab()?.panes[tab()!.activePaneId]?.type === "terminal"}
+        />
 
         <Show when={promptStackerOpen()}>
           <div

@@ -2,16 +2,24 @@ import { createSignal, For, onCleanup, onMount, Show, type Component } from "sol
 import type { AppConfig } from "./ipc/types";
 import { usePromptStackerStore } from "./promptStackerStore";
 
+const { invoke } = (window as any).__TAURI__.core;
+
 export interface PromptQueueFooterProps {
   config: AppConfig;
+  /** Active pane ID — used for "send to shell" when the active pane is a terminal. */
+  activePaneId?: number;
+  /** Whether the active pane is a terminal (enables "send to shell"). */
+  activeIsTerminal?: boolean;
 }
 
 const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
   const store = usePromptStackerStore();
   const [copiedId, setCopiedId] = createSignal<string | null>(null);
+  const [sentId, setSentId] = createSignal<string | null>(null);
   const [collapsed, setCollapsed] = createSignal(false);
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   let copiedTimer: number | undefined;
+  let sentTimer: number | undefined;
   let containerRef: HTMLDivElement | undefined;
 
   onMount(() => {
@@ -20,12 +28,15 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
 
   onCleanup(() => {
     if (copiedTimer !== undefined) window.clearTimeout(copiedTimer);
+    if (sentTimer !== undefined) window.clearTimeout(sentTimer);
   });
 
   const summarizePrompt = (text: string) => {
     const singleLine = text.trim().replace(/\s+/g, " ");
     return singleLine.length > 56 ? `${singleLine.slice(0, 56).trimEnd()}...` : singleLine;
   };
+
+  const canSendToShell = () => props.activeIsTerminal && props.activePaneId != null;
 
   const copyPrompt = async (promptId: string, text: string) => {
     try {
@@ -36,6 +47,25 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
     } catch {
       // Ignore clipboard failures; the queue remains visible.
     }
+  };
+
+  const sendToShell = async (promptId: string, text: string) => {
+    if (!canSendToShell()) return;
+    try {
+      await invoke("write_to_pty", { paneId: props.activePaneId, data: text });
+      setSentId(promptId);
+      if (sentTimer !== undefined) window.clearTimeout(sentTimer);
+      sentTimer = window.setTimeout(() => setSentId(null), 1400);
+    } catch {
+      // Fall back to clipboard copy on failure.
+      await copyPrompt(promptId, text);
+    }
+  };
+
+  const feedbackFor = (promptId: string) => {
+    if (sentId() === promptId) return "sent";
+    if (copiedId() === promptId) return "copied";
+    return null;
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -50,7 +80,17 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
       e.preventDefault();
       setFocusedIndex((i) => Math.max(i - 1, 0));
       focusButton();
-    } else if (e.key === "Enter" || e.key === " ") {
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const idx = focusedIndex();
+      if (idx >= 0 && idx < queued.length) {
+        if (e.shiftKey && canSendToShell()) {
+          void sendToShell(queued[idx].id, queued[idx].text);
+        } else {
+          void copyPrompt(queued[idx].id, queued[idx].text);
+        }
+      }
+    } else if (e.key === " ") {
       e.preventDefault();
       const idx = focusedIndex();
       if (idx >= 0 && idx < queued.length) {
@@ -131,7 +171,7 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
           <div style={{ flex: "1", display: "flex", gap: "6px", overflow: "auto", "padding-bottom": "2px", "align-items": "center" }}>
             <For each={store.queuedPrompts()}>
               {(prompt, index) => {
-                const isCopied = () => copiedId() === prompt.id;
+                const fb = () => feedbackFor(prompt.id);
                 const isFocused = () => focusedIndex() === index();
                 return (
                   <div
@@ -166,17 +206,33 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
                     {/* Prompt pill */}
                     <button
                       data-queue-item
-                      onClick={() => void copyPrompt(prompt.id, prompt.text)}
+                      onClick={(e) => {
+                        if (e.shiftKey && canSendToShell()) {
+                          void sendToShell(prompt.id, prompt.text);
+                        } else {
+                          void copyPrompt(prompt.id, prompt.text);
+                        }
+                      }}
                       onFocus={() => setFocusedIndex(index())}
-                      title="Copy prompt to clipboard"
+                      title={canSendToShell() ? "Click to copy, Shift+click to send to shell" : "Copy prompt to clipboard"}
                       style={{
-                        background: isCopied() ? "var(--success-bg)" : "var(--bg-panel)",
-                        color: isCopied() ? "#d7f3dc" : "#c9c9c9",
-                        border: isCopied()
-                          ? "1px solid #35633e"
-                          : isFocused()
-                            ? "1px solid var(--accent)"
-                            : "1px solid #2b2b2b",
+                        background: fb() === "sent"
+                          ? "#1a3a4a"
+                          : fb() === "copied"
+                            ? "var(--success-bg)"
+                            : "var(--bg-panel)",
+                        color: fb() === "sent"
+                          ? "#7ad4f0"
+                          : fb() === "copied"
+                            ? "#d7f3dc"
+                            : "#c9c9c9",
+                        border: fb() === "sent"
+                          ? "1px solid #2a5a6a"
+                          : fb() === "copied"
+                            ? "1px solid #35633e"
+                            : isFocused()
+                              ? "1px solid var(--accent)"
+                              : "1px solid #2b2b2b",
                         "border-radius": "var(--radius-pill)",
                         height: "28px",
                         padding: "0 8px 0 11px",
@@ -190,11 +246,11 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
                         outline: "none",
                       }}
                     >
-                      <span style={{ color: isCopied() ? "#b8e5c0" : "#6f84a8", "font-size": "10px", "flex-shrink": "0" }}>
+                      <span style={{ color: fb() ? "inherit" : "#6f84a8", "font-size": "10px", "flex-shrink": "0" }}>
                         {index() + 1}
                       </span>
                       <span style={{ overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
-                        {isCopied() ? "Copied" : summarizePrompt(prompt.text)}
+                        {fb() === "sent" ? "Sent" : fb() === "copied" ? "Copied" : summarizePrompt(prompt.text)}
                       </span>
 
                       {/* Remove button */}

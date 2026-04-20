@@ -201,42 +201,47 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
           >
             <div style={{ display: "flex", "flex-direction": "column", gap: "12px", overflow: "auto", "padding-right": "8px" }}>
               <For each={store.prompts()}>
-                {(prompt) => (
-                  <div style={{
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border)",
-                    "border-radius": "10px",
-                    padding: "16px",
-                    "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
-                  }}>
-                    <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "12px", "margin-bottom": "10px" }}>
-                      <div style={{ "font-size": "11px", color: "var(--text-dim)" }}>
-                        {formatDate(prompt.created_at)}
+                {(prompt) => {
+                  const queued = () => store.isQueued(prompt.id);
+                  return (
+                    <div style={{
+                      background: "var(--bg-surface)",
+                      border: queued() ? "1px solid var(--queued-border)" : "1px solid var(--border)",
+                      "border-left": queued() ? "3px solid var(--queued-text)" : "1px solid var(--border)",
+                      "border-radius": "10px",
+                      padding: "16px",
+                      "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
+                      transition: "border-color 0.15s ease",
+                    }}>
+                      <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "12px", "margin-bottom": "10px" }}>
+                        <div style={{ "font-size": "11px", color: "var(--text-dim)" }}>
+                          {formatDate(prompt.created_at)}
+                        </div>
+                        <button
+                          class="btn btn-pill"
+                          onClick={() => void store.toggleQueued(prompt.id)}
+                          disabled={store.syncingQueue()}
+                          style={{
+                            background: queued() ? "var(--queued-bg)" : "var(--border)",
+                            color: queued() ? "var(--queued-text)" : "#9aa3b2",
+                            border: queued() ? "1px solid var(--queued-border)" : "1px solid #3a3a3a",
+                            padding: "6px 12px",
+                            "font-size": "11px",
+                            cursor: store.syncingQueue() ? "default" : "pointer",
+                            "flex-shrink": "0",
+                          }}
+                        >
+                          {queued()
+                            ? `Queued #${store.queuePosition(prompt.id) + 1}`
+                            : "Add to Queue"}
+                        </button>
                       </div>
-                      <button
-                        class="btn btn-pill"
-                        onClick={() => void store.toggleQueued(prompt.id)}
-                        disabled={store.syncingQueue()}
-                        style={{
-                          background: store.isQueued(prompt.id) ? "var(--queued-bg)" : "var(--border)",
-                          color: store.isQueued(prompt.id) ? "var(--queued-text)" : "#9aa3b2",
-                          border: store.isQueued(prompt.id) ? "1px solid var(--queued-border)" : "1px solid #3a3a3a",
-                          padding: "6px 12px",
-                          "font-size": "11px",
-                          cursor: store.syncingQueue() ? "default" : "pointer",
-                          "flex-shrink": "0",
-                        }}
-                      >
-                        {store.isQueued(prompt.id)
-                          ? `Queued ${store.queuePosition(prompt.id) + 1}`
-                          : "Add to Queue"}
-                      </button>
+                      <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
+                        {prompt.text}
+                      </div>
                     </div>
-                    <div style={{ "font-size": "13px", "line-height": "1.7", color: "var(--text-primary)", "white-space": "pre-wrap", "word-break": "break-word" }}>
-                      {prompt.text}
-                    </div>
-                  </div>
-                )}
+                  );
+                }}
               </For>
             </div>
           </Show>

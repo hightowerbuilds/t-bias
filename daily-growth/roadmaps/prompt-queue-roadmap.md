@@ -36,14 +36,16 @@ Ship the minimum viable queue with persistent state and shell access.
 
 Make the queue pleasant to manage instead of merely functional.
 
-- [ ] Let users remove a queued prompt directly from the footer
-- [ ] Add a "clear queue" action
-- [ ] Add drag-to-reorder or explicit move-left / move-right controls
-- [ ] Add stronger visual feedback for copied items
-- [ ] Add queue-empty state styling so the footer transition feels intentional
-- [ ] Add optional collapse / expand behavior for the footer
-- [ ] Add keyboard navigation for queued items
-- [ ] Make it obvious when a prompt is already queued while browsing saved prompts
+- [x] Let users remove a queued prompt directly from the footer
+- [x] Add a "clear queue" action
+- [x] Add drag-to-reorder or explicit move-left / move-right controls
+- [x] Add stronger visual feedback for copied items
+- [x] Add queue-empty state styling so the footer transition feels intentional
+- [x] Add optional collapse / expand behavior for the footer
+- [x] Add keyboard navigation for queued items
+- [x] Make it obvious when a prompt is already queued while browsing saved prompts
+
+Note (2026-04-19): Footer pills now have inline × remove buttons, ◂/▸ reorder arrows, and a Clear button. Collapse/expand toggle on footer label. Arrow keys + Enter/Space/Delete for keyboard nav. Focused item gets accent border. Saved prompts list shows queued items with left accent border and `#N` badge. Store expanded with `removeFromQueue`, `clearQueue`, `moveInQueue`. 5 new tests (96 total).
 
 **Exit criteria:** users can manage the queue from either surface without friction.
 

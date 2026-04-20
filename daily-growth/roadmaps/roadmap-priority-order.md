@@ -8,9 +8,13 @@ Choose a single smart order for the active roadmaps so work compounds instead of
 
 ## Active Roadmaps
 
-1. `terminal-trust-hardening-roadmap.md`
-2. `prompt-queue-roadmap.md`
-3. `feature-roadmap.md`
+1. `prompt-queue-roadmap.md`
+2. `feature-roadmap.md`
+3. `leftover-followup.md` (manual testing, docs, minor code from trust hardening)
+
+## Completed Roadmaps (in `old-maps/`)
+
+- `terminal-trust-hardening-roadmap.md` — completed 2026-04-19 (6 phases, code work done)
 
 `old-maps/` should be treated as archive/reference, not active planning.
 

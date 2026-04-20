@@ -24,6 +24,9 @@ export interface PromptStackerStore {
   isQueued: (promptId: string) => boolean;
   queuePosition: (promptId: string) => number;
   toggleQueued: (promptId: string) => Promise<void>;
+  removeFromQueue: (promptId: string) => Promise<void>;
+  clearQueue: () => Promise<void>;
+  moveInQueue: (promptId: string, delta: number) => Promise<void>;
 }
 
 export interface PromptStackerClient {
@@ -151,6 +154,24 @@ export function createPromptStackerStore(client: PromptStackerClient = defaultPr
           ? currentQueue.filter((id) => id !== promptId)
           : [...currentQueue, promptId];
         await persistQueue(nextQueue);
+      },
+      removeFromQueue: async (promptId: string) => {
+        const nextQueue = queueIds().filter((id) => id !== promptId);
+        await persistQueue(nextQueue);
+      },
+      clearQueue: async () => {
+        await persistQueue([]);
+      },
+      moveInQueue: async (promptId: string, delta: number) => {
+        const current = queueIds();
+        const idx = current.indexOf(promptId);
+        if (idx < 0) return;
+        const target = idx + delta;
+        if (target < 0 || target >= current.length) return;
+        const next = [...current];
+        next[idx] = current[target];
+        next[target] = promptId;
+        await persistQueue(next);
       },
     };
   });

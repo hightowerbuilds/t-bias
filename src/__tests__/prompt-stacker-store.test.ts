@@ -117,4 +117,73 @@ describe("prompt-stacker-store", () => {
     expect(store.prompts().map((prompt) => prompt.id)).toEqual(["b"]);
     expect(store.queueIds()).toEqual(["b"]);
   });
+
+  it("removes a specific prompt from the queue", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second"), makePrompt("c", "Third")],
+      queue: ["a", "b", "c"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.removeFromQueue("b");
+
+    expect(client.setQueue).toHaveBeenCalledWith(["a", "c"]);
+    expect(store.queueIds()).toEqual(["a", "c"]);
+  });
+
+  it("clears the entire queue", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second")],
+      queue: ["a", "b"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.clearQueue();
+
+    expect(client.setQueue).toHaveBeenCalledWith([]);
+    expect(store.queueIds()).toEqual([]);
+    expect(store.queuedPrompts()).toEqual([]);
+  });
+
+  it("moves a prompt left in the queue", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second"), makePrompt("c", "Third")],
+      queue: ["a", "b", "c"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.moveInQueue("c", -1);
+
+    expect(client.setQueue).toHaveBeenCalledWith(["a", "c", "b"]);
+  });
+
+  it("moves a prompt right in the queue", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second"), makePrompt("c", "Third")],
+      queue: ["a", "b", "c"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.moveInQueue("a", 1);
+
+    expect(client.setQueue).toHaveBeenCalledWith(["b", "a", "c"]);
+  });
+
+  it("does not move past queue boundaries", async () => {
+    const client = makeClient({
+      prompts: [makePrompt("a", "First"), makePrompt("b", "Second")],
+      queue: ["a", "b"],
+    });
+    const store = createPromptStackerStore(client);
+    await store.ensureLoaded();
+
+    await store.moveInQueue("a", -1); // Already at start
+    await store.moveInQueue("b", 1);  // Already at end
+
+    expect(client.setQueue).not.toHaveBeenCalled();
+  });
 });

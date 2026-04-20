@@ -3,6 +3,7 @@ import { Screen } from "./Screen";
 import { VirtualCanvas, MARK_A, MARK_B, MARK_C, MARK_D_UNKNOWN, MARK_D_SUCCESS, MARK_D_FAILURE } from "./VirtualCanvas";
 import type { Selection } from "./Selection";
 import type { RenderState, TerminalModes } from "./IRenderer";
+import { WIDE } from "./types";
 
 /** A single search hit, in unified buffer coordinates.
  *  absRow 0 = oldest scrollback row; absRow === scrollbackLength means screen row 0. */
@@ -320,9 +321,17 @@ export class TerminalCore {
       const colStart = row === r.startRow ? r.startCol : 0;
       const colEnd = row === r.endRow ? r.endCol : this.cols - 1;
 
+      let skipNext = false;
       for (let col = colStart; col <= colEnd; col++) {
+        if (skipNext) { skipNext = false; continue; }
         const cell = this.screen.getCell(row, col);
-        line += cell.char || " ";
+        if (cell.char) {
+          line += cell.char;
+          // Wide chars occupy 2 cells — skip the empty placeholder
+          if (cell.attrs & WIDE) skipNext = true;
+        } else {
+          line += " ";
+        }
       }
 
       lines.push(line.trimEnd());

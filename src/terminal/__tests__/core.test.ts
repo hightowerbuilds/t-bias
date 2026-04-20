@@ -314,6 +314,62 @@ describe("Grapheme clusters", () => {
     expect(cellAt(c, 0, 3).char).toBe("B");
     expect(c.cursor.x).toBe(4);
   });
+
+  it("skin tone emoji occupies 2 cells", () => {
+    const c = term(20, 5);
+    c.write("👍🏽");
+    expect(cellAt(c, 0, 0).char).toBe("👍🏽");
+    expect(c.cursor.x).toBe(2);
+    expect(cellAt(c, 0, 1).char).toBe("");
+  });
+
+  it("ZWJ family emoji occupies 2 cells", () => {
+    const c = term(20, 5);
+    c.write("👨‍👩‍👧‍👦");
+    expect(cellAt(c, 0, 0).char).toBe("👨‍👩‍👧‍👦");
+    expect(c.cursor.x).toBe(2);
+    expect(cellAt(c, 0, 1).char).toBe("");
+  });
+
+  it("flag emoji occupies 2 cells", () => {
+    const c = term(20, 5);
+    c.write("🇺🇸");
+    expect(cellAt(c, 0, 0).char).toBe("🇺🇸");
+    expect(c.cursor.x).toBe(2);
+  });
+
+  it("keycap emoji (VS16 + combining) occupies 2 cells", () => {
+    const c = term(20, 5);
+    c.write("1️⃣");
+    expect(cellAt(c, 0, 0).char).toBe("1️⃣");
+    expect(c.cursor.x).toBe(2);
+  });
+
+  it("combining accent does not widen the base character", () => {
+    const c = term(20, 5);
+    // "a" + combining acute accent = single 1-cell grapheme
+    c.write("a\u0301");
+    expect(cellAt(c, 0, 0).char).toBe("a\u0301");
+    expect(c.cursor.x).toBe(1);
+  });
+
+  it("CJK ideograph occupies 2 cells", () => {
+    const c = term(20, 5);
+    c.write("漢字");
+    expect(cellAt(c, 0, 0).char).toBe("漢");
+    expect(c.cursor.x).toBe(4);
+    expect(cellAt(c, 0, 2).char).toBe("字");
+  });
+
+  it("mixed CJK, emoji, and ASCII render at correct positions", () => {
+    const c = term(30, 5);
+    c.write("A漢🔥B");
+    expect(cellAt(c, 0, 0).char).toBe("A");   // col 0
+    expect(cellAt(c, 0, 1).char).toBe("漢");  // col 1-2
+    expect(cellAt(c, 0, 3).char).toBe("🔥");  // col 3-4
+    expect(cellAt(c, 0, 5).char).toBe("B");   // col 5
+    expect(c.cursor.x).toBe(6);
+  });
 });
 
 // =========================================================================

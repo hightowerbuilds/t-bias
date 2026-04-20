@@ -34,17 +34,19 @@ Note (2026-04-19): Full parser audit completed. Added: mode 1007 (alternate scro
 
 Emoji and complex scripts render incorrectly without this.
 
-- [ ] Research UAX #29 segmentation rules and existing JS libraries (e.g., `graphemer`, `Intl.Segmenter`)
-- [ ] Decide: use `Intl.Segmenter` (built-in, no dependency) vs. a library vs. custom implementation
-- [ ] Implement grapheme segmentation on the print path in `Screen.ts`
-- [ ] ASCII fast path — skip segmentation for single-byte characters (the 95%+ common case)
-- [ ] Update cursor advancement: grapheme cluster occupies 1 or 2 cells depending on width
-- [ ] Update `isWideChar()` to handle multi-codepoint sequences (emoji modifiers, ZWJ sequences)
-- [ ] Update selection: select by grapheme cluster, not by codepoint
-- [ ] Update `getSelectedText()` to extract full grapheme strings
-- [ ] Test with emoji: flags (🇺🇸), skin tones (👍🏽), ZWJ families (👨‍👩‍👧‍👦), compound emoji (1️⃣)
-- [ ] Test with combining characters: accented Latin, Devanagari, Arabic
+- [x] Research UAX #29 segmentation rules and existing JS libraries (e.g., `graphemer`, `Intl.Segmenter`)
+- [x] Decide: use `Intl.Segmenter` (built-in, no dependency) vs. a library vs. custom implementation
+- [x] Implement grapheme segmentation on the print path in `Screen.ts`
+- [x] ASCII fast path — skip segmentation for single-byte characters (the 95%+ common case)
+- [x] Update cursor advancement: grapheme cluster occupies 1 or 2 cells depending on width
+- [x] Update `isWideChar()` to handle multi-codepoint sequences (emoji modifiers, ZWJ sequences)
+- [x] Update selection: select by grapheme cluster, not by codepoint
+- [x] Update `getSelectedText()` to extract full grapheme strings
+- [x] Test with emoji: flags (🇺🇸), skin tones (👍🏽), ZWJ families (👨‍👩‍👧‍👦), compound emoji (1️⃣)
+- [x] Test with combining characters: accented Latin, Devanagari, Arabic
 - [ ] Verify grapheme materialization in scrollback still works correctly
+
+Note (2026-04-19): Parser already used Intl.Segmenter with ASCII fast path. VirtualCanvas already stored multi-codepoint graphemes via GRAPHEME_SENTINEL. Fixed isWideChar() to detect VS16 (U+FE0F), combining enclosing keycap (U+20E3), and ZWJ sequences. Fixed getSelectedText() to skip wide-char placeholder cells. 7 new grapheme tests (skin tone, ZWJ family, flag, keycap, combining accent, CJK, mixed). 110 tests total.
 
 ### 1.3 Reflow on Resize
 

@@ -158,9 +158,19 @@ export interface TerminalOptions {
 // ---------------------------------------------------------------------------
 export function isWideChar(char: string): boolean {
   const code = char.codePointAt(0)!;
-  // Note: multi-codepoint sequences (ZWJ emoji, flag pairs) have their
-  // first codepoint already in a wide range below, so no length check needed.
-  // Combining mark sequences (e.g. "a\u0301") must NOT be treated as wide.
+
+  // Multi-codepoint graphemes containing VS16 (U+FE0F, emoji presentation
+  // selector) or combining enclosing keycap (U+20E3) render as wide emoji
+  // even when the base codepoint is narrow. Example: "1️⃣", "❤️", "#️⃣".
+  if (char.length > 1) {
+    if (char.indexOf("\uFE0F") >= 0 || char.indexOf("\u20E3") >= 0) return true;
+    // ZWJ sequences (e.g. 👨‍👩‍👧‍👦) — if the base is already wide, the check
+    // below will catch it. If not, the ZWJ + another emoji forces wide.
+    if (char.indexOf("\u200D") >= 0) return true;
+  }
+
+  // Combining mark sequences (e.g. "a\u0301") must NOT be treated as wide —
+  // the base is narrow and combining marks don't change width.
 
   if (code < 0x1100) return false;
   // Hangul Jamo

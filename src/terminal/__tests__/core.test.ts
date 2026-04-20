@@ -714,3 +714,61 @@ describe("TUI typed array consistency", () => {
     expect(vcTextRow(c, 4)).toBe("row9");
   });
 });
+
+// =========================================================================
+// Reflow on resize
+// =========================================================================
+describe("Reflow on resize", () => {
+  it("unwraps soft-wrapped lines when terminal gets wider", () => {
+    const c = term(10, 5);
+    c.write("ABCDEFGHIJKLMNO");
+    expect(textAt(c, 0)).toBe("ABCDEFGHIJ");
+    expect(textAt(c, 1)).toBe("KLMNO");
+
+    c.resize(20, 5);
+    expect(textAt(c, 0)).toBe("ABCDEFGHIJKLMNO");
+    expect(textAt(c, 1)).toBe("");
+  });
+
+  it("re-wraps lines when terminal gets narrower", () => {
+    const c = term(20, 5);
+    c.write("ABCDEFGHIJKLMNO");
+    expect(textAt(c, 0)).toBe("ABCDEFGHIJKLMNO");
+
+    c.resize(10, 5);
+    expect(textAt(c, 0)).toBe("ABCDEFGHIJ");
+    expect(textAt(c, 1)).toBe("KLMNO");
+  });
+
+  it("preserves multiple independent lines through reflow", () => {
+    const c = term(10, 5);
+    c.write("Line1\r\nLine2\r\nLine3");
+
+    c.resize(20, 5);
+    expect(textAt(c, 0)).toBe("Line1");
+    expect(textAt(c, 1)).toBe("Line2");
+    expect(textAt(c, 2)).toBe("Line3");
+  });
+
+  it("preserves colored text attributes through reflow", () => {
+    const c = term(10, 5);
+    c.write("\x1b[31mABCDEFGHIJKLMNO\x1b[0m");
+
+    c.resize(20, 5);
+    expect(textAt(c, 0)).toBe("ABCDEFGHIJKLMNO");
+    const cell = cellAt(c, 0, 0);
+    expect(cell.char).toBe("A");
+    expect(cell.fg).not.toBe(0);
+  });
+
+  it("handles wide chars (CJK) across reflow", () => {
+    const c = term(10, 5);
+    c.write("漢字漢字漢");
+    expect(cellAt(c, 0, 0).char).toBe("漢");
+
+    c.resize(8, 5);
+    expect(cellAt(c, 0, 0).char).toBe("漢");
+    expect(cellAt(c, 0, 6).char).toBe("字");
+    expect(cellAt(c, 1, 0).char).toBe("漢");
+  });
+});

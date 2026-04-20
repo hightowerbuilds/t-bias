@@ -74,9 +74,15 @@ export class TerminalCore {
 
   /** Resize the terminal grid. */
   resize(cols: number, rows: number): void {
+    const colsChanged = cols !== this.cols;
     this.cols = cols;
     this.rows = rows;
-    this.virtualCanvas.resize(cols, rows);
+    // When cols change on the main screen, Screen.resize handles calling
+    // vc.resize itself (it needs to read old content before the VC resizes).
+    // Otherwise, resize the VC first.
+    if (!colsChanged || this.screen.isAltScreen) {
+      this.virtualCanvas.resize(cols, rows);
+    }
     this.screen.resize(cols, rows);
   }
 

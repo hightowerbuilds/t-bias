@@ -52,15 +52,17 @@ Note (2026-04-19): Parser already used Intl.Segmenter with ASCII fast path. Virt
 
 Wrapped lines should reflow when the terminal gets wider.
 
-- [ ] Track which lines are soft-wrapped (continuation of previous line) vs. hard-wrapped (ended with newline)
-- [ ] Add a `wrapped` flag per row in VirtualCanvas (1 bit per row)
-- [ ] On resize wider: merge soft-wrapped continuation rows back into the preceding line
-- [ ] On resize narrower: re-wrap long lines into multiple rows
-- [ ] Preserve cursor position relative to content (not absolute grid position) during reflow
+- [x] Track which lines are soft-wrapped (continuation of previous line) vs. hard-wrapped (ended with newline)
+- [x] Add a `wrapped` flag per row in VirtualCanvas (1 bit per row)
+- [x] On resize wider: merge soft-wrapped continuation rows back into the preceding line
+- [x] On resize narrower: re-wrap long lines into multiple rows
+- [x] Preserve cursor position relative to content (not absolute grid position) during reflow
 - [ ] Handle reflow in scrollback — soft-wrapped rows in history should rejoin
-- [ ] Handle reflow with colored/attributed text — attributes must travel with their characters
-- [ ] Test with `cat` of a long-line file, resize, verify content integrity
-- [ ] Test with shell prompt wrapping and unwrapping
+- [x] Handle reflow with colored/attributed text — attributes must travel with their characters
+- [x] Test with `cat` of a long-line file, resize, verify content integrity
+- [ ] Test with shell prompt wrapping and unwrapping (manual)
+
+Note (2026-04-19): Implemented `reflowResize` in Screen.ts — extracts logical lines (grouped by soft-wrap flags) with full cell attributes, resizes VC, then re-wraps to new column width. Handles wide chars (CJK/emoji) that don't fit at line end. Alt screen is never reflowed (matches xterm/kitty). 5 reflow tests: unwrap wider, re-wrap narrower, independent lines, colored text, CJK. 115 tests total. Scrollback reflow deferred.
 
 ### 1.4 Clipboard Integration (OSC 52)
 

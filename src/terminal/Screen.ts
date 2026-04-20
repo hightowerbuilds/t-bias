@@ -158,6 +158,16 @@ export class Screen implements ParserHandler {
   // Resize
   // ========================================================================
   resize(newCols: number, newRows: number) {
+    const oldCols = this.cols;
+    const oldRows = this.rows;
+
+    // Reflow active screen content when column count changes on the main screen.
+    // Alt screen is never reflowed (matches xterm/kitty behavior).
+    if (newCols !== oldCols && !this.isAltScreen) {
+      this.reflowResize(oldCols, oldRows, newCols, newRows);
+      return;
+    }
+
     // VirtualCanvas handles its own resize (TerminalCore calls vc.resize separately).
     // Screen just needs to update dimensions and clamp cursor/scroll state.
     this.cols = newCols;
@@ -170,6 +180,129 @@ export class Screen implements ParserHandler {
     this.cursorY = Math.min(this.cursorY, newRows - 1);
 
     // Trim scrollback (VC handles its own limit)
+    this.vc.trimScrollback();
+  }
+
+  /**
+   * Resize with content reflow. Extracts logical lines from the active screen,
+   * resizes the underlying VirtualCanvas, then re-wraps lines to the new width.
+   */
+  private reflowResize(oldCols: number, oldRows: number, newCols: number, newRows: number) {
+    // 1. Extract logical lines — groups of rows joined by soft-wrap flags.
+    //    Each logical line is an array of cell data.
+    type CellData = { char: string; fg: Color; bg: Color; attrs: number; ulColor: Color };
+    type LogicalLine = CellData[];
+
+    const lines: LogicalLine[] = [];
+    let cursorLineIdx = -1;
+    let cursorAbsCol = 0;
+
+    let current: CellData[] = [];
+    for (let r = 0; r < oldRows; r++) {
+      for (let c = 0; c < oldCols; c++) {
+        const cell = this.vc.getCell(r, c);
+        // Skip wide-char placeholders (empty cell after a wide char)
+        if (cell.char === "" && c > 0) {
+          const prev = this.vc.getCell(r, c - 1);
+          if (prev.attrs & WIDE) continue;
+        }
+        current.push({
+          char: cell.char,
+          fg: cell.fg,
+          bg: cell.bg,
+          attrs: cell.attrs,
+          ulColor: cell.ulColor,
+        });
+      }
+
+      // Track cursor position within logical lines
+      if (r === this.cursorY) {
+        cursorLineIdx = lines.length;
+        cursorAbsCol = current.length - oldCols + this.cursorX;
+      }
+
+      // A logical line ends when the NEXT row is NOT a soft-wrapped continuation.
+      // (The soft-wrap flag marks a row as continuing from the previous one.)
+      const nextIsContinuation = r + 1 < oldRows && this.vc.isSoftWrapped(r + 1);
+      if (!nextIsContinuation) {
+        // End of logical line — trim trailing blanks
+        while (current.length > 0 && current[current.length - 1].char === "") {
+          current.pop();
+        }
+        lines.push(current);
+        current = [];
+      }
+    }
+    if (current.length > 0) {
+      lines.push(current);
+    }
+
+    // 2. Resize VirtualCanvas (this handles buffer allocation).
+    this.vc.resize(newCols, newRows);
+    this.cols = newCols;
+    this.rows = newRows;
+    this.scrollBottom = newRows - 1;
+    this.scrollTop = 0;
+
+    // Clear the active screen — reflow will write fresh content.
+    for (let r = 0; r < newRows; r++) {
+      this.vc.clearRow(r, DEFAULT_COLOR);
+    }
+
+    // 3. Re-wrap logical lines to new column width and write back.
+    let writeRow = 0;
+    let newCursorX = 0;
+    let newCursorY = 0;
+
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      let col = 0;
+
+      for (let ci = 0; ci < line.length; ci++) {
+        const cell = line[ci];
+        const wide = (cell.attrs & WIDE) !== 0;
+        const cellWidth = wide ? 2 : 1;
+
+        // Need to wrap?
+        if (col + cellWidth > newCols) {
+          if (writeRow < newRows) {
+            this.vc.setSoftWrapped(writeRow, true);
+          }
+          writeRow++;
+          col = 0;
+        }
+
+        if (writeRow >= newRows) {
+          // Content overflows the screen — push to scrollback.
+          // For now, excess content is lost (same as pre-reflow behavior).
+          break;
+        }
+
+        this.vc.setCell(writeRow, col, cell.char, cell.fg, cell.bg, cell.attrs, cell.ulColor);
+        if (wide && col + 1 < newCols) {
+          this.vc.setCell(writeRow, col + 1, "", cell.fg, cell.bg, cell.attrs & ~WIDE, cell.ulColor);
+        }
+        col += cellWidth;
+
+        // Track cursor in the new layout
+        if (li === cursorLineIdx && ci === cursorAbsCol) {
+          newCursorX = col;
+          newCursorY = writeRow;
+        }
+      }
+
+      // End of logical line — NOT soft-wrapped
+      if (writeRow < newRows) {
+        this.vc.setSoftWrapped(writeRow, false);
+      }
+      writeRow++;
+    }
+
+    // 4. Restore cursor
+    this.cursorX = Math.min(newCursorX, newCols - 1);
+    this.cursorY = Math.min(newCursorY, newRows - 1);
+    this.wrapPending = false;
+
     this.vc.trimScrollback();
   }
 

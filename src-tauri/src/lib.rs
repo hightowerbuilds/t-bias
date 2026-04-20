@@ -30,7 +30,6 @@ pub fn run() {
             fs_ops::resolve_existing_dir,
             pty::get_pane_cwd,
             pty::get_pane_foreground_process_name,
-            prompt_stacker::list_prompts,
             prompt_stacker::get_prompt_stacker_state,
             prompt_stacker::save_prompt,
             prompt_stacker::set_prompt_queue,

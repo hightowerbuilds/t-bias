@@ -167,7 +167,6 @@ export const SAVE_NAMED_SESSION_CMD   = "save_named_session"  as const;
 export const LOAD_NAMED_SESSION_CMD   = "load_named_session"  as const;
 export const LIST_NAMED_SESSIONS_CMD  = "list_named_sessions" as const;
 export const DELETE_NAMED_SESSION_CMD = "delete_named_session" as const;
-export const LIST_PROMPTS_CMD         = "list_prompts"         as const;
 export const GET_PROMPT_STACKER_STATE_CMD = "get_prompt_stacker_state" as const;
 export const SAVE_PROMPT_CMD          = "save_prompt"          as const;
 export const SET_PROMPT_QUEUE_CMD     = "set_prompt_queue"     as const;

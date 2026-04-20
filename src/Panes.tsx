@@ -6,12 +6,11 @@ import {
   onCleanup,
   type Component,
 } from "solid-js";
-import type { PaneMap, SplitPane, EditorPane, TerminalPane, PromptStackerPane } from "./pane-tree";
+import type { PaneMap, SplitPane, EditorPane, TerminalPane } from "./pane-tree";
 import TerminalView from "./Terminal";
 import EditorView from "./Editor";
 import FileExplorerView from "./FileExplorer";
 import FlipExplorerView from "./FlipExplorer";
-import PromptStackerView from "./PromptStacker";
 import type { AppConfig, ShellRecord } from "./ipc/types";
 
 // ---------------------------------------------------------------------------
@@ -42,7 +41,6 @@ export interface PanesRootProps {
   onRatioChange: (splitId: number, ratio: number) => void;
   onFlip?: (paneId: number) => void;
   onOpenFile?: (filePath: string) => void;
-  onBackToShell?: () => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,14 +90,10 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
                 onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
               />
             </Match>
-            <Match when={props.panes[props.activePaneId]?.type === "prompt-stacker"}>
-              <PromptStackerView
-                config={props.config}
-                isActive={true}
-                shouldFocus={true}
-                onBackToShell={props.onBackToShell}
-              />
-            </Match>
+            {/* Prompt Stacker panes no longer exist in the tree — the stacker
+                is a modal overlay managed by App.tsx. Legacy saved sessions that
+                had prompt-stacker panes are restored as terminal panes by
+                session-state.ts. */}
           </Switch>
         </div>
       </Show>
@@ -240,24 +234,6 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
             config={props.config}
             isActive={props.paneId === props.activePaneId}
             onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
-          />
-        </div>
-      </Match>
-
-      {/* Prompt Stacker leaf */}
-      <Match when={pane()?.type === "prompt-stacker"}>
-        <div
-          style={{ width: "100%", height: "100%", position: "relative" }}
-          onClick={() => props.onActivate(props.paneId)}
-        >
-          <Show when={props.paneId === props.activePaneId}>
-            <div class="pane-active-border" />
-          </Show>
-          <PromptStackerView
-            config={props.config}
-            isActive={props.paneId === props.activePaneId}
-            shouldFocus={props.paneId === props.activePaneId && !props.zoomed}
-            onBackToShell={props.onBackToShell}
           />
         </div>
       </Match>

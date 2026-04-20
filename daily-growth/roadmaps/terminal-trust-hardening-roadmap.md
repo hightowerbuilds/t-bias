@@ -179,11 +179,13 @@ Progress note:
 
 - workspace lifecycle tests now cover last-tab replacement, active-tab close, and split-pane close behavior through the shared workspace state model
 
-- [ ] Add tests for tab creation, switching, and close behavior
-- [ ] Add tests for pane splitting and collapse behavior
+- [x] Add tests for tab creation, switching, and close behavior
+- [x] Add tests for pane splitting and collapse behavior
 - [ ] Add tests for session landing state transitions
-- [ ] Add tests for Prompt Stacker open/close and persistence interactions
+- [x] Add tests for Prompt Stacker open/close and persistence interactions
 - [ ] Add tests for file explorer open-file workflows
+
+Note (2026-04-19): 91 tests total. workspace-state.test.ts expanded to 22 tests covering tab creation (shell/explorer/editor), switching, close (last tab, active tab, non-active tab, split tabs), split (h/v, nested, zoomed guard), collapse (2-pane, 3-pane, zoomed unzoom), navigation, flip toggle, and split ratio. Session landing and file explorer tests need Tauri runtime or deeper mocking.
 
 ### 5.2 Add backend/PTy workflow coverage
 
@@ -211,9 +213,11 @@ Reduce product ambiguity and stop surprising users.
 
 ### 6.1 Tighten feature semantics
 
-- [ ] Audit any feature whose implementation no longer matches its original model
-- [ ] Remove stale state models and dead compatibility paths
-- [ ] Keep session, shell, and Prompt Stacker terminology consistent
+- [x] Audit any feature whose implementation no longer matches its original model
+- [x] Remove stale state models and dead compatibility paths
+- [x] Keep session, shell, and Prompt Stacker terminology consistent
+
+Note (2026-04-19): Deleted stale `t-bias/` nested directory (leftover from restructuring). Removed dead `list_prompts` IPC command and Rust handler (superseded by `get_prompt_stacker_state`). Removed prompt-stacker pane rendering from Panes.tsx — stacker is now modal-only (App.tsx), pane-tree type retained only for session restore compat in session-state.ts.
 
 ### 6.2 Improve user-facing honesty
 

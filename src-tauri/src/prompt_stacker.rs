@@ -92,13 +92,6 @@ fn next_prompt_id() -> String {
 }
 
 #[tauri::command]
-pub fn list_prompts() -> Vec<PromptRecord> {
-    load_prompt_stacker_state_inner()
-        .map(|state| state.prompts)
-        .unwrap_or_default()
-}
-
-#[tauri::command]
 pub fn get_prompt_stacker_state() -> PromptStackerState {
     load_prompt_stacker_state_inner().unwrap_or_default()
 }

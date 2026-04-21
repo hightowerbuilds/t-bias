@@ -489,8 +489,13 @@ export class CanvasRenderer implements IRenderer {
         let bg: string;
         if (col < cols) {
           const cell = cells[row * cols + col];
+          // Bold + palette 0-7 → bright for inverse background resolution
+          let fgc = cell.fg;
+          if (cell.attrs.bold && fgc.type === "Palette" && fgc.index < 8) {
+            fgc = { type: "Palette", index: fgc.index + 8 };
+          }
           bg = cell.attrs.inverse
-            ? this.resolveFrameColor(cell.fg, theme.foreground)
+            ? this.resolveFrameColor(fgc, theme.foreground)
             : this.resolveFrameColor(cell.bg, theme.background);
         } else {
           bg = "";
@@ -511,7 +516,12 @@ export class CanvasRenderer implements IRenderer {
         if (!cell.char || cell.attrs.hidden) continue;
 
         const wide = cell.attrs.wide;
-        let fg = this.resolveFrameColor(cell.fg, theme.foreground);
+        // Bold + palette 0-7 → promote to bright variant (8-15)
+        let fgColor = cell.fg;
+        if (cell.attrs.bold && fgColor.type === "Palette" && fgColor.index < 8) {
+          fgColor = { type: "Palette", index: fgColor.index + 8 };
+        }
+        let fg = this.resolveFrameColor(fgColor, theme.foreground);
         let bg = this.resolveFrameColor(cell.bg, theme.background);
         if (cell.attrs.inverse) [fg, bg] = [bg, fg];
 

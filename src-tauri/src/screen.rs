@@ -731,13 +731,13 @@ impl Perform for ScreenBuffer {
             }
             'P' => {
                 // DCH — delete characters
-                let n = (p0.max(1)) as usize;
+                let n = (p0.max(1) as usize).min(self.cols - self.cursor_x);
                 let row = self.cursor_y;
                 let col = self.cursor_x;
-                for c in col..(self.cols - n).min(self.cols) {
+                for c in col..self.cols.saturating_sub(n) {
                     self.cells[row * self.cols + c] = self.cells[row * self.cols + c + n].clone();
                 }
-                for c in (self.cols - n).max(col)..self.cols {
+                for c in self.cols.saturating_sub(n)..self.cols {
                     self.erase_cell(row, c);
                 }
                 self.dirty = true;
@@ -802,6 +802,7 @@ impl Perform for ScreenBuffer {
                     self.pen_fg = Color::Default;
                     self.pen_bg = Color::Default;
                     self.pen_attrs = CellAttrs::default();
+                    self.dirty = true;
                     return;
                 }
                 // SGR uses two forms for extended colors:
@@ -829,15 +830,20 @@ impl Perform for ScreenBuffer {
                             let style = group.get(1).copied().unwrap_or(1);
                             self.pen_attrs.underline = style.min(5) as u8;
                         }
+                        5 | 6 => self.pen_attrs.blink = true,
                         7 => self.pen_attrs.inverse = true,
                         8 => self.pen_attrs.hidden = true,
                         9 => self.pen_attrs.strikethrough = true,
+                        21 => self.pen_attrs.underline = 2,    // double underline
                         22 => { self.pen_attrs.bold = false; self.pen_attrs.faint = false; }
                         23 => self.pen_attrs.italic = false,
                         24 => self.pen_attrs.underline = 0,
+                        25 => self.pen_attrs.blink = false,
                         27 => self.pen_attrs.inverse = false,
                         28 => self.pen_attrs.hidden = false,
                         29 => self.pen_attrs.strikethrough = false,
+                        53 => self.pen_attrs.overline = true,
+                        55 => self.pen_attrs.overline = false,
                         30..=37 => self.pen_fg = Color::Palette { index: (code - 30) as u8 },
                         38 => {
                             if group.len() >= 3 && group[1] == 5 {

@@ -27,6 +27,7 @@ import type { SplitPane, EditorPane, TerminalPane } from "./pane-tree";
 import {
   CLOSE_PANE_CMD,
   GET_CONFIG_CMD,
+  GET_PANE_CWD_CMD,
   WRITE_TO_PTY_CMD,
   SAVE_SESSION_CMD,
   LOAD_SESSION_CMD,
@@ -177,7 +178,7 @@ const App: Component = () => {
     }
     if (activePane?.type === "terminal") {
       try {
-        return ((await invoke("get_pane_cwd", { paneId: t.activePaneId })) as string | null) ?? undefined;
+        return ((await invoke(GET_PANE_CWD_CMD, { paneId: t.activePaneId })) as string | null) ?? undefined;
       } catch {
         return undefined;
       }

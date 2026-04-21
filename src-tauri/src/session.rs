@@ -8,17 +8,13 @@
 // Auto-session:  ~/.config/tbias/session.json   (compact JSON, atomic write)
 // Named sessions: ~/.config/tbias/sessions/<name>.json (pretty JSON, atomic write)
 
-use crate::persistence::{atomic_write_json_compact, atomic_write_json_pretty};
+use crate::persistence::{atomic_write_json_compact, atomic_write_json_pretty, tbias_dir};
 use serde_json::Value;
 use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
-
-fn tbias_dir() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("tbias"))
-}
 
 fn auto_session_path() -> Option<PathBuf> {
     Some(tbias_dir()?.join("session.json"))

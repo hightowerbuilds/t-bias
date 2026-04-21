@@ -100,7 +100,6 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
 
     // Always (re-)wire callbacks — they reference props from this mount cycle.
     terminal.onData = (data) => {
-      console.log("[t-bias DEBUG] write to PTY:", data);
       invoke(WRITE_TO_PTY_CMD, { paneId: props.paneId, data });
     };
 

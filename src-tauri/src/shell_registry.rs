@@ -1,3 +1,4 @@
+use crate::persistence::tbias_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -23,10 +24,6 @@ pub struct ShellRecord {
     pub status: ShellRecordStatus,
     pub persist_on_quit: bool,
     pub closed_at: Option<u64>,
-}
-
-fn tbias_dir() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("tbias"))
 }
 
 fn shell_registry_path() -> Option<PathBuf> {

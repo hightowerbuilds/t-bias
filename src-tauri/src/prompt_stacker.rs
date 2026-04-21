@@ -25,9 +25,7 @@ enum PromptStackerFile {
     LegacyPrompts(Vec<PromptRecord>),
 }
 
-fn tbias_dir() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("tbias"))
-}
+use crate::persistence::tbias_dir;
 
 fn prompts_path() -> Option<PathBuf> {
     Some(tbias_dir()?.join("prompt_stacker.json"))

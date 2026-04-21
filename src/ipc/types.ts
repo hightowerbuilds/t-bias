@@ -4,52 +4,6 @@
 // This file explicitly defines the boundary between Rust and TypeScript.
 // Both sides must agree on these shapes.
 
-// ========================== Commands (frontend → backend) ==========================
-
-/** spawn_shell: Start a PTY for a specific pane. */
-export interface SpawnShellArgs {
-  pane_id: number;
-  cols: number;
-  rows: number;
-  shell?: string;
-  cwd?: string;
-}
-
-/** write_to_pty: Send data (keystrokes, paste) to a pane's PTY. */
-export interface WriteToPtyArgs {
-  pane_id: number;
-  data: string;
-}
-
-/** resize_pty: Notify a pane's PTY of a terminal size change. */
-export interface ResizePtyArgs {
-  pane_id: number;
-  cols: number;
-  rows: number;
-}
-
-/** close_pane: Kill a pane's PTY and free its resources. */
-export interface ClosePaneArgs {
-  pane_id: number;
-}
-
-/** get_pane_foreground_process_name: Query the active foreground app in a pane PTY. */
-export interface GetPaneForegroundProcessNameArgs {
-  pane_id: number;
-}
-
-// ========================== Events (backend → frontend) ==========================
-
-/** pty-output-{paneId}: Raw text from a pane's shell process. */
-export interface PtyOutputEvent {
-  payload: string;
-}
-
-/** pty-exit-{paneId}: A pane's shell process has terminated. */
-export interface PtyExitEvent {
-  // No payload
-}
-
 // ========================== Config (backend → frontend) ==========================
 
 /** get_config: Returns the full configuration from disk (or defaults). */

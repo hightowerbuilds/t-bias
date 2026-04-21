@@ -102,7 +102,7 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
       <div style={{
         position: "absolute",
         inset: "0",
-        visibility: props.zoomed ? "hidden" : "visible",
+        visibility: props.zoomed ? "hidden" : "inherit",
         "pointer-events": props.zoomed ? "none" : "auto",
       }}>
         <PaneNode {...props} paneId={props.rootId} />

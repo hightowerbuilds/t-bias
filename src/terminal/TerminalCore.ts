@@ -32,6 +32,7 @@ export class TerminalCore {
   onTitleChange?: (title: string) => void;
   onClipboard?: (text: string) => void;
   onCwdChange?: (cwd: string) => void;
+  onSyncModeChange?: (enabled: boolean) => void;
 
   constructor(cols: number, rows: number, scrollbackLimit = 5000) {
     this.cols = cols;
@@ -42,6 +43,7 @@ export class TerminalCore {
     this.screen.onClipboard = (payload) => this.handleOsc52(payload);
     this.screen.onShellIntegration = (mark, param) => this.handleShellIntegration(mark, param);
     this.screen.onCwd = (uri) => this.handleCwd(uri);
+    this.screen.onSyncModeChange = (enabled) => this.onSyncModeChange?.(enabled);
     this.parser = new Parser(this.screen);
   }
 
@@ -354,11 +356,59 @@ export class TerminalCore {
   getRenderState(): RenderState {
     const screen = this.screen;
     const vc = this.virtualCanvas;
+    const vpOff = screen.viewportOffset;
+    const sbLen = vc.scrollbackLength;
+
+    // Viewport-aware row source resolver.
+    // When viewportOffset > 0 (scrolled up), visible rows are a mix of
+    // scrollback rows (at the top) and active screen rows (at the bottom).
+    const getRowSource = (row: number): import("./IRenderer").RowSource => {
+      if (vpOff > 0 && !screen.isAlternateScreen) {
+        const scrollRow = sbLen - vpOff + row;
+        if (scrollRow >= 0 && scrollRow < sbLen) {
+          // This visible row comes from scrollback
+          const offset = vc.scrollbackRowOffset(scrollRow);
+          return {
+            chars: vc.scrollbackChars,
+            fg: vc.scrollbackFg,
+            bg: vc.scrollbackBg,
+            attrs: vc.scrollbackAttrs,
+            ulColor: null,
+            offset,
+            getGrapheme: null,
+          };
+        }
+        // Below scrollback — active screen row
+        const bufRow = row - (vpOff - Math.min(vpOff, sbLen));
+        if (bufRow >= 0 && bufRow < this.rows) {
+          return {
+            chars: vc.activeChars,
+            fg: vc.activeFg,
+            bg: vc.activeBg,
+            attrs: vc.activeAttrs,
+            ulColor: vc.activeUlColor,
+            offset: vc.rowOffset(bufRow),
+            getGrapheme: (idx) => vc.getGraphemeByIndex(idx),
+          };
+        }
+      }
+      // Not scrolled — direct active screen access
+      return {
+        chars: vc.activeChars,
+        fg: vc.activeFg,
+        bg: vc.activeBg,
+        attrs: vc.activeAttrs,
+        ulColor: vc.activeUlColor,
+        offset: vc.rowOffset(row),
+        getGrapheme: (idx) => vc.getGraphemeByIndex(idx),
+      };
+    };
+
     return {
       cols: this.cols,
       rows: this.rows,
       getCell: (row, col) => screen.getCell(row, col),
-      viewportOffset: screen.viewportOffset,
+      viewportOffset: vpOff,
       dirtyRows: vc.dirtyBitmap,
       chars: vc.activeChars,
       fg: vc.activeFg,
@@ -369,6 +419,7 @@ export class TerminalCore {
       rowOffset: (row) => vc.rowOffset(row),
       dirtyColStart: vc.dirtyColStart,
       dirtyColEnd: vc.dirtyColEnd,
+      getRowSource,
     };
   }
 

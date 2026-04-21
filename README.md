@@ -1,6 +1,8 @@
 # t-bias
 
-A native desktop terminal emulator built with Tauri, Rust, SolidJS, and a fully custom canvas renderer. No xterm.js — the VT parser, screen model, glyph atlas, and rendering pipeline are all built from scratch.
+A terminal emulator for people who live in the command line. t-bias gives you a fast, native shell with tabs, split panes, and built-in tools — a file explorer that flips out from any terminal pane, a prompt stacker for saving and queuing reusable commands, and a code editor. Your workspace layout persists across sessions so you pick up right where you left off.
+
+Built with Tauri and Rust on the backend, SolidJS on the frontend, and a fully custom terminal renderer — no xterm.js. The VT parser, screen model, glyph atlas, and canvas rendering pipeline are all built from scratch.
 
 ## Features
 

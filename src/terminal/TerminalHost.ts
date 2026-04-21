@@ -55,6 +55,7 @@ export class TerminalHost {
   // Render batching + throughput detection
   private textDrawQueued = false;
   private overlayDrawQueued = false;
+  private syncMode = false;
   private writesSinceLastFrame = 0;
   private bytesSinceLastFrame = 0;
   private static readonly HIGH_THROUGHPUT_BYTES = 65536; // 64KB threshold
@@ -152,6 +153,7 @@ export class TerminalHost {
     this.core.onResponse = (data) => this.onData?.(data);
     this.core.onTitleChange = (title) => this.onTitleChange?.(title);
     this.core.onCwdChange = (cwd) => this.onCwdChange?.(cwd);
+    this.core.onSyncModeChange = (enabled) => this.handleSyncMode(enabled);
 
     this.renderer.resize(this.cols, this.rows);
 
@@ -273,6 +275,27 @@ export class TerminalHost {
     this.throughputAccum += data.length;
     this.scheduleTextDraw();
     this.scheduleOverlayDraw();
+  }
+
+  private syncTimeout: number | undefined;
+
+  private handleSyncMode(enabled: boolean) {
+    this.syncMode = enabled;
+    if (enabled) {
+      // Safety: if the app doesn't end sync mode within 200ms (e.g. it crashed),
+      // force rendering so the terminal doesn't appear frozen.
+      if (this.syncTimeout !== undefined) window.clearTimeout(this.syncTimeout);
+      this.syncTimeout = window.setTimeout(() => {
+        if (this.syncMode) {
+          this.syncMode = false;
+          this.scheduleTextDraw();
+          this.scheduleOverlayDraw();
+        }
+      }, 200);
+    } else if (this.syncTimeout !== undefined) {
+      window.clearTimeout(this.syncTimeout);
+      this.syncTimeout = undefined;
+    }
   }
 
   /** Flush buffered writes to the parser in one pass. */
@@ -886,6 +909,10 @@ export class TerminalHost {
         this.textDrawQueued = false;
         if (this.disposed) return;
         this.flushWriteBuffer();
+        // Synchronized output (DEC 2026): the app is mid-update — skip rendering
+        // to avoid showing partial frames. The write buffer has been flushed so
+        // the terminal state is current; we just defer the draw until sync ends.
+        if (this.syncMode) return;
         this.writesSinceLastFrame = 0;
         this.bytesSinceLastFrame = 0;
         const state = this.core.getRenderState();

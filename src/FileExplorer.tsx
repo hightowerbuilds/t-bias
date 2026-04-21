@@ -9,6 +9,7 @@ import { createStore, produce } from "solid-js/store";
 import {
   type DirEntry,
   READ_DIR_CMD,
+  WRITE_FILE_CMD,
   MOVE_ENTRY_CMD,
   CREATE_DIR_CMD,
   DELETE_ENTRY_CMD,
@@ -256,7 +257,7 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
         await invoke(CREATE_DIR_CMD, { path: fullPath });
       } else {
         // Create empty file via write_file
-        await invoke("write_file", { path: fullPath, contents: "" });
+        await invoke(WRITE_FILE_CMD, { path: fullPath, contents: "" });
       }
       const children = await loadDir(rootPath(), 0);
       setNodes(children);
@@ -295,7 +296,7 @@ const FileExplorerView: Component<FileExplorerViewProps> = (props) => {
         height: "100%",
         background: "#1e1e1e",
         color: "#d4d4d4",
-        "font-family": "Menlo, Monaco, 'Courier New', monospace",
+        "font-family": "var(--font-mono)",
         "font-size": "12px",
         display: "flex",
         "flex-direction": "column",
@@ -554,7 +555,7 @@ function ctxItemStyle(): Record<string, string> {
     cursor: "pointer",
     padding: "6px 14px",
     "text-align": "left",
-    "font-family": "Menlo, Monaco, 'Courier New', monospace",
+    "font-family": "var(--font-mono)",
     "font-size": "12px",
   };
 }

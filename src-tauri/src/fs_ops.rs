@@ -32,7 +32,6 @@ fn resolve_existing_dir_path(path: &Path) -> Option<(PathBuf, bool)> {
     }
 
     let mut candidate = path.to_path_buf();
-    let exact = false;
 
     if candidate.exists() && !candidate.is_dir() {
         candidate.pop();
@@ -40,7 +39,7 @@ fn resolve_existing_dir_path(path: &Path) -> Option<(PathBuf, bool)> {
 
     loop {
         if candidate.is_dir() {
-            return Some((candidate, exact));
+            return Some((candidate, false));
         }
         if !candidate.pop() {
             break;

@@ -74,6 +74,9 @@ export class Screen implements ParserHandler {
   // Alternate scroll — when set, scroll events in alt screen send cursor keys
   alternateScroll = false;   // 1007
 
+  // Synchronized output (mode 2026) — suppresses rendering until disabled
+  syncOutput = false;
+
   // Scrollback viewport
   viewportOffset = 0;        // 0 = bottom (live), >0 = scrolled up
 
@@ -92,6 +95,7 @@ export class Screen implements ParserHandler {
   onResponse?: (data: string) => void;
   onClipboard?: (data: string) => void;
   onResizeRequest?: (cols: number, rows: number) => void;
+  onSyncModeChange?: (enabled: boolean) => void;
 
   // Last printed character (for REP)
   private lastChar = "";
@@ -551,7 +555,6 @@ export class Screen implements ParserHandler {
 
   // ------- oscDispatch -------
   oscDispatch(data: string) {
-    console.log("[t-bias DEBUG] oscDispatch:", data);
     const semi = data.indexOf(";");
     if (semi < 0) {
       // Some OSC codes have no payload (e.g., OSC 104, OSC 112)
@@ -1030,7 +1033,9 @@ export class Screen implements ParserHandler {
         if (enable) this.saveCursor();
         else this.restoreCursor();
         break;
-      case 2026:                                            // Synchronized output (no-op, accepted)
+      case 2026:                                            // Synchronized output
+        this.syncOutput = enable;
+        this.onSyncModeChange?.(enable);
         break;
       case 1049:                                            // Alt screen + save/restore
         if (enable) {

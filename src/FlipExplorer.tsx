@@ -81,6 +81,7 @@ const FlipExplorerView: Component<FlipExplorerViewProps> = (props) => {
   const [selectedPath, setSelectedPath] = createSignal<string | null>(null);
   const [fileContent, setFileContent] = createSignal<string>("");
   const [expandedPaths, setExpandedPaths] = createSignal<Set<string>>(new Set());
+  const [treeVersion, setTreeVersion] = createSignal(0);
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [previewMode, setPreviewMode] = createSignal<"source" | "blog">("source");
 
@@ -186,6 +187,7 @@ const FlipExplorerView: Component<FlipExplorerViewProps> = (props) => {
         } catch {
           node.children = [];
         }
+        setTreeVersion((v) => v + 1);
       }
     }
   };
@@ -232,7 +234,7 @@ const FlipExplorerView: Component<FlipExplorerViewProps> = (props) => {
             background: isSelected() ? "#264f78" : "transparent",
             color: isSelected() ? "#d4d4d4" : "#888",
             "font-size": "12px",
-            "font-family": "Menlo, Monaco, 'Courier New', monospace",
+            "font-family": "var(--font-mono)",
             "white-space": "nowrap",
             "overflow": "hidden",
             "text-overflow": "ellipsis",
@@ -253,7 +255,7 @@ const FlipExplorerView: Component<FlipExplorerViewProps> = (props) => {
         </div>
 
         {/* Render children if expanded */}
-        <Show when={nodeProps.node.isDir && isExpanded() && nodeProps.node.children}>
+        <Show when={nodeProps.node.isDir && isExpanded() && (treeVersion(), nodeProps.node.children)}>
           <For each={nodeProps.node.children}>
             {(child) => (
               <TreeNodeComponent node={child} depth={nodeProps.depth + 1} />
@@ -274,7 +276,7 @@ const FlipExplorerView: Component<FlipExplorerViewProps> = (props) => {
         overflow: "hidden",
         background: "#1e1e1e",
         color: "#d4d4d4",
-        "font-family": "Menlo, Monaco, 'Courier New', monospace",
+        "font-family": "var(--font-mono)",
       }}
     >
       {/* Left side: collapsible file tree */}
@@ -546,7 +548,7 @@ const FlipEditorPreview: Component<FlipEditorPreviewProps> = (props) => {
         style={{
           margin: "0",
           padding: "0",
-          "font-family": "Menlo, Monaco, 'Courier New', monospace",
+          "font-family": "var(--font-mono)",
           "font-size": "12px",
           color: "#d4d4d4",
           "line-height": "1.5",

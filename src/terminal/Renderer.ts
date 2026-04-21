@@ -189,9 +189,11 @@ export class CanvasRenderer implements IRenderer {
     const { cols, rows } = state;
     const { cellWidth, cellHeight, ctx, theme } = this;
     const bitmap = state.dirtyRows;
+    const scrolled = state.viewportOffset > 0;
 
     // --- Count dirty rows from the VirtualCanvas bitmap ---
-    const fullRedraw = this.forceFullDraw;
+    // When scrolled into scrollback, dirty bitmap doesn't apply — always full redraw.
+    const fullRedraw = this.forceFullDraw || scrolled;
     this.forceFullDraw = false;
     let dirtyCount = 0;
 
@@ -226,6 +228,9 @@ export class CanvasRenderer implements IRenderer {
       if (!drawAllRows && !bitmap[row]) continue;
       const y = row * cellHeight;
 
+      // Get the correct typed-array source for this row (scrollback or active).
+      const src = state.getRowSource(row);
+
       // Sub-row dirty column range — only use sub-ranges in partial mode.
       // In full-clear mode, non-dirty rows need full-width redraw since
       // the canvas was wiped; dirty rows also use full width for safety.
@@ -238,13 +243,13 @@ export class CanvasRenderer implements IRenderer {
       }
 
       // --- Pass 1: Backgrounds with run merging ---
-      this.drawRowBackgrounds(state, row, colStart, colEnd, y);
+      this.drawRowBackgrounds(src, colStart, colEnd, y, cols);
 
       // --- Pass 2: Glyphs from atlas ---
-      this.drawRowGlyphs(state, row, colStart, colEnd, y);
+      this.drawRowGlyphs(src, colStart, colEnd, y);
 
       // --- Pass 3: Decorations (underline, strikethrough, overline) ---
-      this.drawRowDecorations(state, row, colStart, colEnd, y);
+      this.drawRowDecorations(src, colStart, colEnd, y);
     }
 
     this._lastDrawTime = performance.now() - t0;
@@ -254,9 +259,9 @@ export class CanvasRenderer implements IRenderer {
   // Pass 1: Backgrounds — run merging
   // =========================================================================
 
-  private drawRowBackgrounds(state: RenderState, row: number, colStart: number, colEnd: number, y: number) {
+  private drawRowBackgrounds(src: import("./IRenderer").RowSource, colStart: number, colEnd: number, y: number, cols: number) {
     const { cellWidth, cellHeight, ctx, theme } = this;
-    const offset = state.rowOffset(row);
+    const offset = src.offset;
     let runStart = colStart;
     let runBg = theme.background;
 
@@ -265,13 +270,11 @@ export class CanvasRenderer implements IRenderer {
 
       if (col < colEnd) {
         const idx = offset + col;
-        const a = state.attrs[idx];
-        let fgVal = state.fg[idx];
-        let bgVal = state.bg[idx];
+        const a = src.attrs[idx];
         if (a & INVERSE) {
-          bg = this.resolveColor(fgVal, theme.foreground);
+          bg = this.resolveColor(src.fg[idx], theme.foreground);
         } else {
-          bg = this.resolveColor(bgVal, theme.background);
+          bg = this.resolveColor(src.bg[idx], theme.background);
         }
       } else {
         bg = ""; // sentinel to flush last run
@@ -292,20 +295,20 @@ export class CanvasRenderer implements IRenderer {
   // Pass 2: Glyphs — atlas blitting
   // =========================================================================
 
-  private drawRowGlyphs(state: RenderState, row: number, colStart: number, colEnd: number, y: number) {
-    const { cellWidth, cellHeight, ctx, theme, dpr } = this;
-    const offset = state.rowOffset(row);
+  private drawRowGlyphs(src: import("./IRenderer").RowSource, colStart: number, colEnd: number, y: number) {
+    const { cellWidth, cellHeight, ctx, theme } = this;
+    const offset = src.offset;
     const GRAPHEME = 0xFFFFFFFF;
 
     for (let col = colStart; col < colEnd; col++) {
       const idx = offset + col;
-      const cp = state.chars[idx];
-      const a = state.attrs[idx];
+      const cp = src.chars[idx];
+      const a = src.attrs[idx];
       if (cp === 0 || (a & HIDDEN)) continue;
 
       // Resolve char string from codepoint or grapheme map
       const char = cp === GRAPHEME
-        ? (state.getGrapheme(idx) ?? "")
+        ? (src.getGrapheme?.(idx) ?? "")
         : String.fromCodePoint(cp);
       if (!char) continue;
 
@@ -314,8 +317,8 @@ export class CanvasRenderer implements IRenderer {
       const italic = (a & ITALIC) !== 0;
       const faint = (a & FAINT) !== 0;
 
-      let fg = this.resolveColor(state.fg[idx], theme.foreground);
-      let bg = this.resolveColor(state.bg[idx], theme.background);
+      let fg = this.resolveColor(src.fg[idx], theme.foreground);
+      let bg = this.resolveColor(src.bg[idx], theme.background);
       if (a & INVERSE) [fg, bg] = [bg, fg];
 
       const { entry, source } = this.atlas.getTracked(char, bold, italic, faint, fg, wide);
@@ -337,26 +340,26 @@ export class CanvasRenderer implements IRenderer {
   // Pass 3: Decorations
   // =========================================================================
 
-  private drawRowDecorations(state: RenderState, row: number, colStart: number, colEnd: number, y: number) {
+  private drawRowDecorations(src: import("./IRenderer").RowSource, colStart: number, colEnd: number, y: number) {
     const { cellWidth, cellHeight, ctx, theme } = this;
-    const offset = state.rowOffset(row);
+    const offset = src.offset;
 
     for (let col = colStart; col < colEnd; col++) {
       const idx = offset + col;
-      const a = state.attrs[idx];
+      const a = src.attrs[idx];
       const x = col * cellWidth;
       const wide = (a & WIDE) !== 0;
       const w = wide ? cellWidth * 2 : cellWidth;
 
-      let fg = this.resolveColor(state.fg[idx], theme.foreground);
+      let fg = this.resolveColor(src.fg[idx], theme.foreground);
       if (a & INVERSE) {
-        fg = this.resolveColor(state.bg[idx], theme.background);
+        fg = this.resolveColor(src.bg[idx], theme.background);
       }
 
       // Underline
       const ul = ulStyle(a);
       if (ul > 0) {
-        const ulc = state.ulColor[idx];
+        const ulc = src.ulColor ? src.ulColor[idx] : DEFAULT_COLOR;
         const ulColor = isDefault(ulc) ? fg : this.resolveColor(ulc, fg);
         ctx.strokeStyle = ulColor;
         ctx.lineWidth = 1;

@@ -25,6 +25,18 @@ export interface SelectionBounds {
  * Renderers can use getCell() for compatibility, or read typed arrays directly
  * for zero-allocation high-performance rendering.
  */
+/** Per-row typed-array source — tells the renderer which arrays + offset to use. */
+export interface RowSource {
+  readonly chars: Uint32Array;
+  readonly fg: Uint32Array;
+  readonly bg: Uint32Array;
+  /** Uint32Array for active screen, Uint16Array for scrollback (12-bit attrs). */
+  readonly attrs: Uint32Array | Uint16Array;
+  readonly ulColor: Uint32Array | null;  // null for scrollback (always DEFAULT_COLOR)
+  readonly offset: number;
+  readonly getGrapheme: ((idx: number) => string | undefined) | null;
+}
+
 export interface RenderState {
   readonly cols: number;
   readonly rows: number;
@@ -33,7 +45,7 @@ export interface RenderState {
   readonly viewportOffset: number;
   /** Bitmap of which rows have changed since last draw (1 = dirty). */
   readonly dirtyRows: Uint8Array;
-  // --- Direct typed-array access (zero-allocation) ---
+  // --- Direct typed-array access (zero-allocation, active screen only) ---
   readonly chars: Uint32Array;
   readonly fg: Uint32Array;
   readonly bg: Uint32Array;
@@ -45,6 +57,9 @@ export interface RenderState {
   /** Sub-row dirty column range (only valid when dirtyRows[row] is set). */
   readonly dirtyColStart: Uint16Array;
   readonly dirtyColEnd: Uint16Array;
+  /** Viewport-aware row source — returns the correct typed arrays + offset
+   *  for a visible row, whether it's from scrollback or the active screen. */
+  readonly getRowSource: (row: number) => RowSource;
 }
 
 // ---------------------------------------------------------------------------

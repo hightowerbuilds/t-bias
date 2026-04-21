@@ -1,5 +1,5 @@
 import { createSignal, For, onCleanup, onMount, Show, type Component } from "solid-js";
-import type { AppConfig } from "./ipc/types";
+import { WRITE_TO_PTY_CMD, type AppConfig } from "./ipc/types";
 import { usePromptStackerStore } from "./promptStackerStore";
 
 const { invoke } = (window as any).__TAURI__.core;
@@ -32,8 +32,8 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
   });
 
   const summarizePrompt = (text: string) => {
-    const singleLine = text.trim().replace(/\s+/g, " ");
-    return singleLine.length > 56 ? `${singleLine.slice(0, 56).trimEnd()}...` : singleLine;
+    const words = text.trim().replace(/\s+/g, " ").split(" ");
+    return words.length > 5 ? words.slice(0, 5).join(" ") + "..." : words.join(" ");
   };
 
   const canSendToShell = () => props.activeIsTerminal && props.activePaneId != null;
@@ -52,7 +52,7 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
   const sendToShell = async (promptId: string, text: string) => {
     if (!canSendToShell()) return;
     try {
-      await invoke("write_to_pty", { paneId: props.activePaneId, data: text });
+      await invoke(WRITE_TO_PTY_CMD, { paneId: props.activePaneId, data: text });
       setSentId(promptId);
       if (sentTimer !== undefined) window.clearTimeout(sentTimer);
       sentTimer = window.setTimeout(() => setSentId(null), 1400);
@@ -129,10 +129,10 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
           border: "0",
           "border-top": "1px solid var(--bg-elevated)",
           display: "flex",
-          "align-items": "center",
+          "align-items": "flex-start",
           gap: "8px",
-          padding: "0 12px",
-          height: collapsed() ? "32px" : "46px",
+          padding: "8px 12px",
+          height: collapsed() ? "32px" : "88px",
           "box-sizing": "border-box",
           overflow: "hidden",
           color: props.config.theme.foreground,
@@ -168,7 +168,7 @@ const PromptQueueFooter: Component<PromptQueueFooterProps> = (props) => {
 
         {/* Queue items (hidden when collapsed) */}
         <Show when={!collapsed()}>
-          <div style={{ flex: "1", display: "flex", gap: "6px", overflow: "auto", "padding-bottom": "2px", "align-items": "center" }}>
+          <div style={{ flex: "1", display: "flex", "flex-wrap": "wrap", gap: "6px", overflow: "auto", "padding": "4px 0", "align-items": "center", "align-content": "flex-start" }}>
             <For each={store.queuedPrompts()}>
               {(prompt, index) => {
                 const fb = () => feedbackFor(prompt.id);

@@ -4,7 +4,13 @@
 // Atomic write + compact/pretty JSON helpers used by session.rs,
 // shell_registry.rs, and prompt_stacker.rs.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Returns the platform config directory for tbias (`<config_dir>/tbias`).
+/// Shared by session, shell_registry, and prompt_stacker modules.
+pub fn tbias_dir() -> Option<PathBuf> {
+    Some(dirs::config_dir()?.join("tbias"))
+}
 
 /// Write `contents` to `path` atomically: write to a sibling temp file first,
 /// then rename into place. On most filesystems rename is atomic, so readers

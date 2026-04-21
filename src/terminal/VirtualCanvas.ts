@@ -996,4 +996,19 @@ export class VirtualCanvas {
   get activeBg(): Uint32Array { return this.activePage.bg; }
   get activeAttrs(): Uint32Array { return this.activePage.attrs; }
   get activeUlColor(): Uint32Array { return this.activePage.ulColor; }
+
+  // --- Scrollback typed-array access (for viewport-aware rendering) ---
+  get scrollbackChars(): Uint32Array { return this.sbChars; }
+  get scrollbackFg(): Uint32Array { return this.sbFg; }
+  get scrollbackBg(): Uint32Array { return this.sbBg; }
+  get scrollbackAttrs(): Uint16Array { return this.sbAttrs; }
+  get scrollbackCols(): number { return this.sbCols; }
+
+  /** Get the byte offset into scrollback typed arrays for a scrollback row.
+   *  scrollRow 0 = oldest row. Returns -1 if out of range. */
+  scrollbackRowOffset(scrollRow: number): number {
+    if (scrollRow < 0 || scrollRow >= this.sbCount) return -1;
+    const physRow = (this.sbHead + scrollRow) % this.scrollbackLimit;
+    return physRow * this.sbCols;
+  }
 }

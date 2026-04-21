@@ -6,9 +6,10 @@ import {
   onCleanup,
   type Component,
 } from "solid-js";
-import type { PaneMap, SplitPane, EditorPane, TerminalPane } from "./pane-tree";
+import type { PaneMap, SplitPane, EditorPane, CanvasPane, TerminalPane } from "./pane-tree";
 import TerminalView from "./Terminal";
 import EditorView from "./Editor";
+import CanvasView from "./Canvas";
 import FileExplorerView from "./FileExplorer";
 import FlipExplorerView from "./FlipExplorer";
 import type { AppConfig, ShellRecord } from "./ipc/types";
@@ -85,6 +86,15 @@ export const PanesRoot: Component<PanesRootProps> = (props) => {
               <EditorView
                 paneId={props.activePaneId}
                 pane={props.panes[props.activePaneId] as EditorPane}
+                config={props.config}
+                isActive={true}
+                onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
+              />
+            </Match>
+            <Match when={props.panes[props.activePaneId]?.type === "canvas"}>
+              <CanvasView
+                paneId={props.activePaneId}
+                pane={props.panes[props.activePaneId] as CanvasPane}
                 config={props.config}
                 isActive={true}
                 onTitleChange={(t) => props.onTitleChange(props.activePaneId, t)}
@@ -231,6 +241,25 @@ const PaneNode: Component<PaneNodeProps> = (props) => {
           <EditorView
             paneId={props.paneId}
             pane={pane() as EditorPane}
+            config={props.config}
+            isActive={props.paneId === props.activePaneId}
+            onTitleChange={(t) => props.onTitleChange(props.paneId, t)}
+          />
+        </div>
+      </Match>
+
+      {/* Canvas leaf */}
+      <Match when={pane()?.type === "canvas"}>
+        <div
+          style={{ width: "100%", height: "100%", position: "relative" }}
+          onClick={() => props.onActivate(props.paneId)}
+        >
+          <Show when={props.paneId === props.activePaneId}>
+            <div class="pane-active-border" />
+          </Show>
+          <CanvasView
+            paneId={props.paneId}
+            pane={pane() as CanvasPane}
             config={props.config}
             isActive={props.paneId === props.activePaneId}
             onTitleChange={(t) => props.onTitleChange(props.paneId, t)}

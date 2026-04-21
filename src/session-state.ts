@@ -26,6 +26,9 @@ export function tabToSavedTab(t: SessionTabState): SavedTab {
     if (pane.type === "editor") {
       return { type: "editor", filePath: (pane as EditorPane).filePath };
     }
+    if (pane.type === "canvas") {
+      return { type: "canvas" };
+    }
     const split = pane as SplitPane;
     return {
       type: "split",
@@ -96,6 +99,17 @@ export function savedTabToTabState(
         id,
         panes: { [id]: { type: "editor", id, filePath: node.filePath } as EditorPane },
         paneTitles: { [id]: node.filePath ? node.filePath.split("/").pop()! : "Untitled" },
+        paneCwds: {},
+      };
+    }
+
+    if (node.type === "canvas") {
+      const id = newId();
+      leafPaneIds.push(id);
+      return {
+        id,
+        panes: { [id]: { type: "canvas", id } },
+        paneTitles: { [id]: "Canvas" },
         paneCwds: {},
       };
     }

@@ -75,8 +75,21 @@ pub fn run() {
                 )?;
             }
 
-            // Build native "View" menu with File Explorer and Code Editor items.
-            use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
+            // Build native menus.
+            use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+
+            // Edit menu — required on macOS for Cmd+C/V/X/A to work in WebView inputs.
+            let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                .item(&PredefinedMenuItem::undo(app, None)?)
+                .item(&PredefinedMenuItem::redo(app, None)?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(app, None)?)
+                .item(&PredefinedMenuItem::copy(app, None)?)
+                .item(&PredefinedMenuItem::paste(app, None)?)
+                .item(&PredefinedMenuItem::select_all(app, None)?)
+                .build()?;
+
+            // View menu with File Explorer and Code Editor items.
             let file_explorer_item = MenuItem::with_id(
                 app, "open_file_explorer", "File Explorer", true, None::<&str>,
             )?;
@@ -87,7 +100,11 @@ pub fn run() {
                 .item(&file_explorer_item)
                 .item(&code_editor_item)
                 .build()?;
-            let menu = MenuBuilder::new(app).item(&view_submenu).build()?;
+
+            let menu = MenuBuilder::new(app)
+                .item(&edit_submenu)
+                .item(&view_submenu)
+                .build()?;
             app.set_menu(menu)?;
 
             app.on_menu_event(|app_handle, event| {

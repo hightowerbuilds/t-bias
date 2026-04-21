@@ -13,6 +13,7 @@ import PromptQueueFooter from "./PromptQueueFooter";
 import { usePromptStackerStore } from "./promptStackerStore";
 import { TabBar } from "./TabBar";
 import { ShellLanding } from "./ShellLanding";
+import CanvasModal from "./Canvas";
 import { CloseConfirmDialog, type PendingClose } from "./CloseConfirmDialog";
 import Settings from "./Settings";
 import {
@@ -72,6 +73,7 @@ const App: Component = () => {
   const [shellLandingOpen, setShellLandingOpen] = createSignal(false);
   const [promptStackerOpen, setPromptStackerOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [canvasOpen, setCanvasOpen] = createSignal(false);
   const [pendingClose, setPendingClose] = createSignal<PendingClose | null>(null);
 
   const [tabs, setTabs] = createStore<TabState[]>([]);
@@ -496,6 +498,10 @@ const App: Component = () => {
   };
 
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if (canvasOpen()) {
+      if (e.key === "Escape") { e.preventDefault(); setCanvasOpen(false); }
+      return; // Let canvas handle all other keys (including Cmd+V paste)
+    }
     if (promptStackerOpen()) {
       if (e.key === "Escape") { e.preventDefault(); setPromptStackerOpen(false); }
       return;
@@ -698,6 +704,7 @@ const App: Component = () => {
           }}
           onOpenShells={() => void openShellLanding()}
           onOpenStacker={() => { setShellLandingOpen(false); setSettingsOpen(false); setPromptStackerOpen(true); }}
+          onOpenCanvas={() => { setShellLandingOpen(false); setPromptStackerOpen(false); setSettingsOpen(false); setCanvasOpen(true); }}
           onOpenSettings={() => { setShellLandingOpen(false); setPromptStackerOpen(false); setSettingsOpen(true); }}
         />
 
@@ -734,11 +741,13 @@ const App: Component = () => {
           </For>
         </div>
 
-        <PromptQueueFooter
-          config={config()!}
-          activePaneId={tab()?.activePaneId}
-          activeIsTerminal={tab()?.panes[tab()!.activePaneId]?.type === "terminal"}
-        />
+        <Show when={!canvasOpen()}>
+          <PromptQueueFooter
+            config={config()!}
+            activePaneId={tab()?.activePaneId}
+            activeIsTerminal={tab()?.panes[tab()!.activePaneId]?.type === "terminal"}
+          />
+        </Show>
 
         <Show when={promptStackerOpen()}>
           <div
@@ -805,6 +814,26 @@ const App: Component = () => {
               onUpdateVteApps={(apps) => {
                 setConfig((prev) => prev ? { ...prev, vte_apps: apps } : prev);
               }}
+            />
+          </div>
+        </Show>
+
+        <Show when={canvasOpen()}>
+          <div
+            style={{
+              position: "fixed",
+              inset: "0",
+              background: "var(--bg-overlay)",
+              display: "flex",
+              "flex-direction": "column",
+              "z-index": "var(--z-stacker-modal)",
+              "min-height": "0",
+            }}
+          >
+            <CanvasModal
+              config={config()!}
+              isActive={canvasOpen()}
+              onClose={() => setCanvasOpen(false)}
             />
           </div>
         </Show>

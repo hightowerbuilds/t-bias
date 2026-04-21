@@ -28,6 +28,11 @@ export interface EditorPane {
   filePath?: string;
 }
 
+export interface CanvasPane {
+  type: "canvas";
+  id: number;
+}
+
 export interface SplitPane {
   type: "split";
   id: number;
@@ -39,7 +44,7 @@ export interface SplitPane {
   b: number; // second child pane ID
 }
 
-export type Pane = TerminalPane | FileExplorerPane | PromptStackerPane | EditorPane | SplitPane;
+export type Pane = TerminalPane | FileExplorerPane | PromptStackerPane | EditorPane | CanvasPane | SplitPane;
 export type PaneMap = Record<number, Pane>;
 
 // ---------------------------------------------------------------------------

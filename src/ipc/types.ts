@@ -107,6 +107,7 @@ export type SavedPane =
   | { type: "file-explorer"; path?: string }
   | { type: "prompt-stacker" }
   | { type: "editor"; filePath?: string }
+  | { type: "canvas" }
   | { type: "split"; dir: "h" | "v"; ratio: number; a: SavedPane; b: SavedPane };
 
 export interface SavedTab {

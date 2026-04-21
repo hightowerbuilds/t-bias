@@ -8,6 +8,7 @@ import {
   type PaneMap,
   type SplitPane,
   type EditorPane,
+  type CanvasPane,
 } from "./pane-tree";
 
 export interface WorkspaceTabState {
@@ -106,6 +107,22 @@ export function makeEditorTab(newId: () => number, filePath?: string): Workspace
     activePaneId: paneId,
     panes: { [paneId]: { type: "editor", id: paneId, filePath } as EditorPane },
     paneTitles: { [paneId]: title },
+    paneProcessTitles: {},
+    paneCwds: {},
+    zoomed: false,
+  };
+}
+
+export function makeCanvasTab(newId: () => number): WorkspaceTabState {
+  const paneId = newId();
+  return {
+    id: newId(),
+    title: "Canvas",
+    hasActivity: false,
+    rootId: paneId,
+    activePaneId: paneId,
+    panes: { [paneId]: { type: "canvas", id: paneId } as CanvasPane },
+    paneTitles: { [paneId]: "Canvas" },
     paneProcessTitles: {},
     paneCwds: {},
     zoomed: false,

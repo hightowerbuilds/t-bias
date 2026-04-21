@@ -737,8 +737,15 @@ impl Perform for ScreenBuffer {
                     self.pen_attrs = CellAttrs::default();
                     return;
                 }
-                for group in &raw_groups {
-                    if group.is_empty() { continue; }
+                // SGR uses two forms for extended colors:
+                // Colon form: CSI 38:5:N m → single group [38, 5, N]
+                // Semicolon form: CSI 38;5;N m → three groups [38], [5], [N]
+                // We handle both by first checking colon sub-params within
+                // a group, then falling back to look-ahead across groups.
+                let mut gi = 0;
+                while gi < raw_groups.len() {
+                    let group = &raw_groups[gi];
+                    if group.is_empty() { gi += 1; continue; }
                     let code = group[0];
                     match code {
                         0 => {
@@ -766,16 +773,30 @@ impl Perform for ScreenBuffer {
                         29 => self.pen_attrs.strikethrough = false,
                         30..=37 => self.pen_fg = Color::Palette { index: (code - 30) as u8 },
                         38 => {
-                            // Foreground color: 38:5:N (palette) or 38:2:R:G:B (RGB)
-                            // Also handles semicolon form: 38;5;N or 38;2;R;G;B
                             if group.len() >= 3 && group[1] == 5 {
+                                // Colon form: 38:5:N
                                 self.pen_fg = Color::Palette { index: group[2] as u8 };
                             } else if group.len() >= 5 && group[1] == 2 {
+                                // Colon form: 38:2:R:G:B
                                 self.pen_fg = Color::Rgb {
                                     r: group[2] as u8,
                                     g: group[3] as u8,
                                     b: group[4] as u8,
                                 };
+                            } else if gi + 2 < raw_groups.len() {
+                                // Semicolon form: look ahead
+                                let sub = raw_groups[gi + 1].first().copied().unwrap_or(0);
+                                if sub == 5 && gi + 2 < raw_groups.len() {
+                                    let idx = raw_groups[gi + 2].first().copied().unwrap_or(0);
+                                    self.pen_fg = Color::Palette { index: idx as u8 };
+                                    gi += 2;
+                                } else if sub == 2 && gi + 4 < raw_groups.len() {
+                                    let r = raw_groups[gi + 2].first().copied().unwrap_or(0);
+                                    let g = raw_groups[gi + 3].first().copied().unwrap_or(0);
+                                    let b = raw_groups[gi + 4].first().copied().unwrap_or(0);
+                                    self.pen_fg = Color::Rgb { r: r as u8, g: g as u8, b: b as u8 };
+                                    gi += 4;
+                                }
                             }
                         }
                         39 => self.pen_fg = Color::Default,
@@ -789,6 +810,19 @@ impl Perform for ScreenBuffer {
                                     g: group[3] as u8,
                                     b: group[4] as u8,
                                 };
+                            } else if gi + 2 < raw_groups.len() {
+                                let sub = raw_groups[gi + 1].first().copied().unwrap_or(0);
+                                if sub == 5 && gi + 2 < raw_groups.len() {
+                                    let idx = raw_groups[gi + 2].first().copied().unwrap_or(0);
+                                    self.pen_bg = Color::Palette { index: idx as u8 };
+                                    gi += 2;
+                                } else if sub == 2 && gi + 4 < raw_groups.len() {
+                                    let r = raw_groups[gi + 2].first().copied().unwrap_or(0);
+                                    let g = raw_groups[gi + 3].first().copied().unwrap_or(0);
+                                    let b = raw_groups[gi + 4].first().copied().unwrap_or(0);
+                                    self.pen_bg = Color::Rgb { r: r as u8, g: g as u8, b: b as u8 };
+                                    gi += 4;
+                                }
                             }
                         }
                         49 => self.pen_bg = Color::Default,
@@ -796,6 +830,7 @@ impl Perform for ScreenBuffer {
                         100..=107 => self.pen_bg = Color::Palette { index: (code - 100 + 8) as u8 },
                         _ => {}
                     }
+                    gi += 1;
                 }
             }
 

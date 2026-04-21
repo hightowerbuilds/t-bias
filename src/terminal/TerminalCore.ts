@@ -366,7 +366,6 @@ export class TerminalCore {
       if (vpOff > 0 && !screen.isAlternateScreen) {
         const scrollRow = sbLen - vpOff + row;
         if (scrollRow >= 0 && scrollRow < sbLen) {
-          // This visible row comes from scrollback
           const offset = vc.scrollbackRowOffset(scrollRow);
           return {
             chars: vc.scrollbackChars,
@@ -378,8 +377,7 @@ export class TerminalCore {
             getGrapheme: null,
           };
         }
-        // Below scrollback — active screen row
-        const bufRow = row - (vpOff - Math.min(vpOff, sbLen));
+        const bufRow = row - vpOff;
         if (bufRow >= 0 && bufRow < this.rows) {
           return {
             chars: vc.activeChars,

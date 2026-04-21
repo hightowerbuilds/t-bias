@@ -413,7 +413,7 @@ impl ScreenBuffer {
                     }
                 } else {
                     // This row comes from the active screen
-                    let active_row = row as i64 - (vp as i64 - vp.min(sb_len) as i64);
+                    let active_row = row as i64 - vp as i64;
                     if active_row >= 0 && (active_row as usize) < self.rows {
                         let ar = active_row as usize;
                         for c in 0..self.cols {

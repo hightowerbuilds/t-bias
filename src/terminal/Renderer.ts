@@ -225,17 +225,15 @@ export class CanvasRenderer implements IRenderer {
 
     // --- Draw rows ---
     for (let row = 0; row < rows; row++) {
-      if (!drawAllRows && !bitmap[row]) continue;
+      if (!drawAllRows && row < rows && !bitmap[row]) continue;
       const y = row * cellHeight;
 
       // Get the correct typed-array source for this row (scrollback or active).
       const src = state.getRowSource(row);
 
       // Sub-row dirty column range — only use sub-ranges in partial mode.
-      // In full-clear mode, non-dirty rows need full-width redraw since
-      // the canvas was wiped; dirty rows also use full width for safety.
-      const colStart = partialRedraw ? state.dirtyColStart[row] : 0;
-      const colEnd = partialRedraw ? state.dirtyColEnd[row] : cols;
+      const colStart = partialRedraw && row < rows ? state.dirtyColStart[row] : 0;
+      const colEnd = partialRedraw && row < rows ? state.dirtyColEnd[row] : cols;
 
       if (partialRedraw) {
         ctx.fillStyle = theme.background;

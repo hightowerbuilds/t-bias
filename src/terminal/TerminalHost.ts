@@ -62,6 +62,9 @@ export class TerminalHost {
    *  exclusively by the Rust VTE backend via drawFrame(). */
   rustRenderMode = false;
   private lastScrollbackLen = 0;
+
+  // Smooth scroll — accumulates wheel pixel deltas, snaps to row boundaries
+  private scrollPixelAccum = 0;
   private writesSinceLastFrame = 0;
   private bytesSinceLastFrame = 0;
   private static readonly HIGH_THROUGHPUT_BYTES = 65536; // 64KB threshold
@@ -205,15 +208,16 @@ export class TerminalHost {
     this.scheduleOverlayDraw();
   }
 
-  /** Attach overlay canvases for selection and cursor. */
+  /** Attach overlay canvases for selection and cursor, scroll proxy, and canvas wrapper. */
   private createOverlayCanvases() {
     const container = this.textCanvas.parentElement;
     if (!container) return;
+    const p = this.padding;
 
     // Selection canvas (Layer 1)
     this.selectionCanvas = document.createElement("canvas");
     this.selectionCanvas.style.cssText =
-      `position:absolute;top:${this.padding}px;left:${this.padding}px;width:calc(100% - ${this.padding * 2}px);height:calc(100% - ${this.padding * 2}px);pointer-events:none;`;
+      `position:absolute;top:${p}px;left:${p}px;width:calc(100% - ${p * 2}px);height:calc(100% - ${p * 2}px);pointer-events:none;`;
     container.appendChild(this.selectionCanvas);
     this.selCtx = this.selectionCanvas.getContext("2d", { alpha: true })!;
 
@@ -221,7 +225,7 @@ export class TerminalHost {
     this.cursorCanvas = document.createElement("canvas");
     this.cursorCanvas.tabIndex = 0;
     this.cursorCanvas.style.cssText =
-      `position:absolute;top:${this.padding}px;left:${this.padding}px;width:calc(100% - ${this.padding * 2}px);height:calc(100% - ${this.padding * 2}px);outline:none;`;
+      `position:absolute;top:${p}px;left:${p}px;width:calc(100% - ${p * 2}px);height:calc(100% - ${p * 2}px);outline:none;`;
     container.appendChild(this.cursorCanvas);
     this.curCtx = this.cursorCanvas.getContext("2d", { alpha: true })!;
 
@@ -264,6 +268,7 @@ export class TerminalHost {
     this.updateInputSinkPosition();
   }
 
+  /** Update the scroll spacer height to reflect current scrollback + viewport size. */
   get gridSize(): { cols: number; rows: number } {
     return { cols: this.cols, rows: this.rows };
   }
@@ -281,6 +286,7 @@ export class TerminalHost {
   drawFrame(frame: import("../ipc/types").ScreenFrame) {
     if (this.disposed) return;
     this.rustRenderMode = true;
+    if (this.core.viewportOffset > 0) return; // Don't paint Rust frames while scrolled
     if (this.renderer instanceof CanvasRenderer) {
       (this.renderer as CanvasRenderer).drawFrame(frame);
     }
@@ -357,6 +363,8 @@ export class TerminalHost {
       this.renderer.resize(this.cols, this.rows);
       this.resizeOverlayCanvases();
 
+      this.scrollPixelAccum = 0;
+
       this.scheduleTextDraw();
       this.scheduleOverlayDraw();
       this.onResize?.(this.cols, this.rows);
@@ -380,8 +388,10 @@ export class TerminalHost {
   setFontSize(size: number) {
     const clamped = Math.max(TerminalHost.MIN_FONT_SIZE, Math.min(TerminalHost.MAX_FONT_SIZE, size));
     if (clamped === this.fontSize) return;
+    // Convert pixel scroll state to new cell dimensions
     this.fontSize = clamped;
     this.renderer.setFontSize(clamped);
+    this.scrollPixelAccum = 0;
     this.fit();
   }
 
@@ -555,6 +565,7 @@ export class TerminalHost {
       this.scheduleOverlayDraw();
     }
     this.core.resetViewport();
+    this.scrollPixelAccum = 0;
     this.lastKeypressTime = performance.now();
     this.onData?.(text);
     this.resetBlink();
@@ -636,9 +647,9 @@ export class TerminalHost {
         e.preventDefault();
         const absRow = this.core.findPrevPrompt();
         if (absRow >= 0) {
-          this.core.scrollToPrompt(absRow);
-          this.scheduleTextDraw();
-          this.scheduleOverlayDraw();
+          const sbLen = this.core.scrollbackLength;
+          const targetVpOff = Math.max(0, Math.min(sbLen, sbLen - absRow));
+          this.setPixelScrollToRow(targetVpOff);
         }
         return;
       }
@@ -646,9 +657,9 @@ export class TerminalHost {
         e.preventDefault();
         const absRow = this.core.findNextPrompt();
         if (absRow >= 0) {
-          this.core.scrollToPrompt(absRow);
-          this.scheduleTextDraw();
-          this.scheduleOverlayDraw();
+          const sbLen = this.core.scrollbackLength;
+          const targetVpOff = Math.max(0, Math.min(sbLen, sbLen - absRow));
+          this.setPixelScrollToRow(targetVpOff);
         }
         return;
       }
@@ -672,16 +683,12 @@ export class TerminalHost {
     if (e.shiftKey && !modes.isAlternateScreen) {
       if (e.key === "PageUp") {
         e.preventDefault();
-        this.core.scrollViewport(this.rows);
-        this.scheduleTextDraw();
-        this.scheduleOverlayDraw();
+        this.setPixelScrollToRow(this.core.viewportOffset + this.rows);
         return;
       }
       if (e.key === "PageDown") {
         e.preventDefault();
-        this.core.scrollViewport(-this.rows);
-        this.scheduleTextDraw();
-        this.scheduleOverlayDraw();
+        this.setPixelScrollToRow(this.core.viewportOffset - this.rows);
         return;
       }
     }
@@ -695,6 +702,7 @@ export class TerminalHost {
         this.scheduleOverlayDraw();
       }
       this.core.resetViewport();
+      this.scrollPixelAccum = 0;
       this.lastKeypressTime = performance.now();
       this.onData?.(seq);
       this.resetBlink();
@@ -896,16 +904,39 @@ export class TerminalHost {
                                 : (modes.applicationCursor ? "\x1bOB" : "\x1b[B");
       for (let i = 0; i < lines; i++) this.onData?.(key);
     } else if (!modes.isAlternateScreen) {
-      const lines = e.deltaY > 0 ? 3 : -3;
-      if (this.rustRenderMode && this.onScroll) {
-        this.onScroll(-lines);
-      } else {
-        this.core.scrollViewport(-lines);
+      // Accumulate wheel pixel deltas and convert to row-level scroll.
+      // This gives smooth per-row scrolling from trackpads without sub-pixel complexity.
+      const { cellHeight } = this.renderer;
+      let px: number;
+      if (e.deltaMode === 1) px = e.deltaY * cellHeight;
+      else if (e.deltaMode === 2) px = e.deltaY * this.rows * cellHeight;
+      else px = e.deltaY;
+
+      // Accumulate pixels. Negative = scroll into history, positive = scroll toward live.
+      // We negate because deltaY>0 means "wheel down" = toward live = decrease viewportOffset.
+      this.scrollPixelAccum -= px;
+      const rowDelta = Math.trunc(this.scrollPixelAccum / cellHeight);
+      if (rowDelta !== 0) {
+        this.scrollPixelAccum -= rowDelta * cellHeight;
+        this.core.scrollViewport(rowDelta);
         this.scheduleTextDraw();
+        this.scheduleOverlayDraw();
       }
-      this.scheduleOverlayDraw();
     }
   };
+
+  /** Snap scroll to an exact row offset (for PageUp/Down, prompt nav). */
+  private setPixelScrollToRow(rowOffset: number) {
+    const maxRows = this.core.scrollbackLength;
+    const clamped = Math.max(0, Math.min(maxRows, rowOffset));
+    const delta = clamped - this.core.viewportOffset;
+    if (delta !== 0) {
+      this.scrollPixelAccum = 0;
+      this.core.scrollViewport(delta);
+      this.scheduleTextDraw();
+      this.scheduleOverlayDraw();
+    }
+  }
 
   private handleContextMenu = (e: MouseEvent) => {
     if (this.core.modes.mouseEnabled) { e.preventDefault(); return; }
@@ -941,6 +972,7 @@ export class TerminalHost {
     const vc = this.core.virtualCanvas;
     const sbLen = vc.scrollbackLength;
     const vpOff = state.viewportOffset;
+    const totalRows = state.rows;
 
     // Update cache metrics (no-op if unchanged)
     this.scrollCache.updateMetrics(
@@ -953,9 +985,9 @@ export class TerminalHost {
       this.lastScrollbackLen = sbLen;
     }
 
-    // How many scrollback rows are visible in the viewport?
-    const sbRowsVisible = Math.min(vpOff, Math.min(sbLen, state.rows));
-    const activeRowsVisible = state.rows - sbRowsVisible;
+    // How many scrollback rows are visible in the viewport (including extra row)?
+    const sbRowsVisible = Math.min(vpOff, Math.min(sbLen, totalRows));
+    const activeRowsVisible = totalRows - sbRowsVisible;
 
     // The first scrollback row visible at the top of the viewport
     const firstSbRow = sbLen - vpOff;
@@ -984,7 +1016,7 @@ export class TerminalHost {
     const ctx = this.textCanvas.getContext("2d", { alpha: false })!;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = this.theme.background;
-    ctx.fillRect(0, 0, state.cols * renderer.cellWidth, state.rows * renderer.cellHeight);
+    ctx.fillRect(0, 0, state.cols * renderer.cellWidth, totalRows * renderer.cellHeight);
 
     this.scrollCache.compositeRows(ctx, firstSbRow, sbRowsVisible, 0);
 
@@ -1004,7 +1036,7 @@ export class TerminalHost {
 
   private scheduleTextDraw() {
     if (this.disposed) return;
-    if (this.rustRenderMode) return;
+    if (this.rustRenderMode && this.core.viewportOffset === 0) return;
     if (!this.textDrawQueued) {
       this.textDrawQueued = true;
       requestAnimationFrame(() => {
@@ -1051,13 +1083,13 @@ export class TerminalHost {
     const { cellWidth, cellHeight } = this.renderer;
     const w = this.cols * cellWidth;
     const h = this.rows * cellHeight;
-
     ctx.clearRect(0, 0, w, h);
 
     // OSC 133 exit-status indicators (3px left-edge bar: green = success, red = failure)
     if (!this.core.modes.isAlternateScreen) {
       const dMarks = this.core.getVisibleDMarks();
       for (const { viewportRow, success } of dMarks) {
+        if (viewportRow >= this.rows) continue;
         ctx.fillStyle = success ? "#6a9955" : "#f44747";
         ctx.globalAlpha = 0.85;
         ctx.fillRect(0, viewportRow * cellHeight + 1, 3, cellHeight - 2);
@@ -1133,24 +1165,25 @@ export class TerminalHost {
 
     // Selection
     const sel = this.selection.range;
-    if (!sel || !this.selection.active) return;
+    if (sel && this.selection.active) {
+      ctx.fillStyle = this.theme.selectionBg;
+      ctx.globalAlpha = 0.4;
 
-    ctx.fillStyle = this.theme.selectionBg;
-    ctx.globalAlpha = 0.4;
+      for (let row = sel.startRow; row <= sel.endRow && row < this.rows; row++) {
+        if (row < 0) continue;
+        const colStart = row === sel.startRow ? sel.startCol : 0;
+        const colEnd = row === sel.endRow ? sel.endCol : this.cols - 1;
+        ctx.fillRect(
+          colStart * cellWidth,
+          row * cellHeight,
+          (colEnd - colStart + 1) * cellWidth,
+          cellHeight,
+        );
+      }
 
-    for (let row = sel.startRow; row <= sel.endRow && row < this.rows; row++) {
-      if (row < 0) continue;
-      const colStart = row === sel.startRow ? sel.startCol : 0;
-      const colEnd = row === sel.endRow ? sel.endCol : this.cols - 1;
-      ctx.fillRect(
-        colStart * cellWidth,
-        row * cellHeight,
-        (colEnd - colStart + 1) * cellWidth,
-        cellHeight,
-      );
+      ctx.globalAlpha = 1.0;
     }
 
-    ctx.globalAlpha = 1.0;
   }
 
   private drawCursorLayer() {
@@ -1574,8 +1607,7 @@ export class TerminalHost {
       targetOffset = 0;
     }
 
-    this.core.scrollViewport(targetOffset - this.core.viewportOffset);
-    this.scheduleTextDraw();
+    this.setPixelScrollToRow(targetOffset);
   }
 
   private updateSearchCount(): void {

@@ -126,7 +126,7 @@ export class Screen implements ParserHandler {
         return this.vc.getScrollbackCell(scrollRow, col);
       }
       // Below the scrollback — render from active buffer
-      const bufRow = row - (this.viewportOffset - Math.min(this.viewportOffset, this.vc.scrollbackLength));
+      const bufRow = row - this.viewportOffset;
       if (bufRow >= 0 && bufRow < this.rows) {
         return this.vc.getCell(bufRow, col);
       }

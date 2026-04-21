@@ -4,6 +4,7 @@ import {
   SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD,
   GET_PANE_FOREGROUND_PROCESS_NAME_CMD,
   GET_FRAME_CMD,
+  SCROLL_VIEWPORT_CMD,
   RESOLVE_EXISTING_DIR_CMD,
   CREATE_SHELL_RECORD_CMD,
   ATTACH_SHELL_RECORD_CMD,
@@ -100,9 +101,16 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
     // Signal that the terminal object exists so focus/resize can fire.
     setTerminalReady(true);
 
+    // Enable Rust render mode immediately — prevents the JS text draw
+    // pipeline from ever firing, avoiding the race where JS draws before
+    // the first Rust frame arrives.
+    terminal.rustRenderMode = true;
+
     // Always (re-)wire callbacks — they reference props from this mount cycle.
     terminal.onData = (data) => {
       invoke(WRITE_TO_PTY_CMD, { paneId: props.paneId, data });
+      // Reset viewport to bottom on any user input
+      invoke("reset_viewport", { paneId: props.paneId }).catch(() => {});
     };
 
     terminal.core.onClipboard = (text) => {
@@ -136,11 +144,21 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       invoke(RESIZE_PTY_CMD, { paneId: props.paneId, cols, rows });
     };
 
-    // PTY event listeners — pty-output is kept for activity detection only.
-    // Rendering is handled exclusively by the Rust VT backend via frame events.
+    terminal.onScroll = (delta) => {
+      invoke(SCROLL_VIEWPORT_CMD, { paneId: props.paneId, delta }).then(() => {
+        // After scrolling, fetch the new frame immediately
+        invoke(GET_FRAME_CMD, { paneId: props.paneId }).then((frame: any) => {
+          if (frame && terminal) terminal.drawFrame(frame);
+        }).catch(() => {});
+      }).catch(() => {});
+    };
+
+    // PTY event listeners — feed data to JS pipeline for scroll/selection/copy,
+    // but text rendering is handled by the Rust VT backend via frame events.
     const unlistenOutput = await listen(
       `pty-output-${props.paneId}`,
-      (_event: any) => {
+      (event: any) => {
+        terminal!.write(event.payload as string);
         if (!props.isActive) {
           props.onActivity?.();
         }

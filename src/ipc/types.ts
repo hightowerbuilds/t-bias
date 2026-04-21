@@ -165,6 +165,8 @@ export const RESOLVE_EXISTING_DIR_CMD = "resolve_existing_dir" as const;
 export const GET_PANE_CWD_CMD        = "get_pane_cwd"          as const;
 export const GET_PANE_FOREGROUND_PROCESS_NAME_CMD = "get_pane_foreground_process_name" as const;
 export const GET_FRAME_CMD            = "get_frame"             as const;
+export const SCROLL_VIEWPORT_CMD     = "scroll_viewport"       as const;
+export const RESET_VIEWPORT_CMD      = "reset_viewport"        as const;
 
 // ========================== Screen Frame (Rust → frontend) ==========================
 

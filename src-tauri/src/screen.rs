@@ -112,6 +112,9 @@ pub struct ScreenBuffer {
     // Dirty flag — set when the screen has changed since last frame read
     dirty: bool,
 
+    // Viewport scroll offset (0 = live bottom, >0 = scrolled up)
+    viewport_offset: usize,
+
     // Tabstops
     tabstops: Vec<bool>,
 }
@@ -164,6 +167,7 @@ impl ScreenBuffer {
             title: String::new(),
             osc_buf: String::new(),
             dirty: true,
+            viewport_offset: 0,
             tabstops,
         }
     }
@@ -386,15 +390,78 @@ impl ScreenBuffer {
         }
         self.dirty = false;
 
+        let mut frame_cells;
+
+        if self.viewport_offset > 0 && !self.alternate_screen {
+            // Scrolled into scrollback — compose visible rows from
+            // scrollback history + active screen.
+            let sb_len = self.scrollback.len();
+            let vp = self.viewport_offset;
+            frame_cells = Vec::with_capacity(self.cols * self.rows);
+
+            for row in 0..self.rows {
+                let sb_row_idx = sb_len as i64 - vp as i64 + row as i64;
+                if sb_row_idx >= 0 && (sb_row_idx as usize) < sb_len {
+                    // This row comes from scrollback
+                    let sb_row = &self.scrollback[sb_row_idx as usize];
+                    for c in 0..self.cols {
+                        if c < sb_row.len() {
+                            frame_cells.push(sb_row[c].clone());
+                        } else {
+                            frame_cells.push(Cell::default());
+                        }
+                    }
+                } else {
+                    // This row comes from the active screen
+                    let active_row = row as i64 - (vp as i64 - vp.min(sb_len) as i64);
+                    if active_row >= 0 && (active_row as usize) < self.rows {
+                        let ar = active_row as usize;
+                        for c in 0..self.cols {
+                            frame_cells.push(self.cells[ar * self.cols + c].clone());
+                        }
+                    } else {
+                        for _ in 0..self.cols {
+                            frame_cells.push(Cell::default());
+                        }
+                    }
+                }
+            }
+        } else {
+            frame_cells = self.cells.clone();
+        }
+
+        // Strip underline from all cells to prevent rendering artifacts.
+        for cell in &mut frame_cells {
+            cell.attrs.underline = 0;
+        }
+
         Some(ScreenFrame {
             cols: self.cols,
             rows: self.rows,
-            cells: self.cells.clone(),
+            cells: frame_cells,
             cursor_x: self.cursor_x,
             cursor_y: self.cursor_y,
-            cursor_visible: self.cursor_visible,
+            cursor_visible: self.cursor_visible && self.viewport_offset == 0,
             title: self.title.clone(),
         })
+    }
+
+    /// Scroll the viewport. Positive = scroll up (into history), negative = scroll down.
+    pub fn scroll_viewport(&mut self, delta: i32) {
+        let max = self.scrollback.len();
+        let new_offset = (self.viewport_offset as i32 + delta).max(0).min(max as i32) as usize;
+        if new_offset != self.viewport_offset {
+            self.viewport_offset = new_offset;
+            self.dirty = true;
+        }
+    }
+
+    /// Reset viewport to bottom (live view).
+    pub fn reset_viewport(&mut self) {
+        if self.viewport_offset != 0 {
+            self.viewport_offset = 0;
+            self.dirty = true;
+        }
     }
 
     pub fn is_sync_output(&self) -> bool {

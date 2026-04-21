@@ -388,6 +388,35 @@ pub fn get_frame(
     Ok(ss.screen.take_frame())
 }
 
+/// Scroll the Rust screen buffer viewport.
+#[tauri::command]
+pub fn scroll_viewport(
+    state: tauri::State<'_, PtyState>,
+    pane_id: u32,
+    delta: i32,
+) -> Result<(), String> {
+    let screens = state.screens.lock().map_err(|e| e.to_string())?;
+    if let Some(screen) = screens.get(&pane_id) {
+        let mut ss = screen.lock().map_err(|e| e.to_string())?;
+        ss.screen.scroll_viewport(delta);
+    }
+    Ok(())
+}
+
+/// Reset the Rust screen buffer viewport to the bottom.
+#[tauri::command]
+pub fn reset_viewport(
+    state: tauri::State<'_, PtyState>,
+    pane_id: u32,
+) -> Result<(), String> {
+    let screens = state.screens.lock().map_err(|e| e.to_string())?;
+    if let Some(screen) = screens.get(&pane_id) {
+        let mut ss = screen.lock().map_err(|e| e.to_string())?;
+        ss.screen.reset_viewport();
+    }
+    Ok(())
+}
+
 fn is_shell_process(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),

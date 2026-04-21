@@ -60,7 +60,7 @@ export class TerminalHost {
   private syncMode = false;
   /** When true, the JS text draw pipeline is disabled — rendering is handled
    *  exclusively by the Rust VTE backend via drawFrame(). */
-  private rustRenderMode = false;
+  rustRenderMode = false;
   private lastScrollbackLen = 0;
   private writesSinceLastFrame = 0;
   private bytesSinceLastFrame = 0;
@@ -112,6 +112,7 @@ export class TerminalHost {
   onResize?: (cols: number, rows: number) => void;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
+  onScroll?: (delta: number) => void;
 
   private pointerTarget(): HTMLCanvasElement {
     return this.cursorCanvas ?? this.textCanvas;
@@ -287,6 +288,12 @@ export class TerminalHost {
 
   write(data: string) {
     if (this.disposed) return;
+    if (this.rustRenderMode) {
+      // In Rust render mode, feed data directly to the JS parser for
+      // scroll/selection/search state — but never schedule a text draw.
+      this.core.write(data);
+      return;
+    }
     // Buffer the data — it will be flushed to the parser before the next render.
     // This coalesces multiple rapid pty-output events into a single parser pass,
     // reducing per-call overhead and enabling the parser to process larger chunks.
@@ -890,8 +897,12 @@ export class TerminalHost {
       for (let i = 0; i < lines; i++) this.onData?.(key);
     } else if (!modes.isAlternateScreen) {
       const lines = e.deltaY > 0 ? 3 : -3;
-      this.core.scrollViewport(-lines);
-      this.scheduleTextDraw();
+      if (this.rustRenderMode && this.onScroll) {
+        this.onScroll(-lines);
+      } else {
+        this.core.scrollViewport(-lines);
+        this.scheduleTextDraw();
+      }
       this.scheduleOverlayDraw();
     }
   };
@@ -993,9 +1004,6 @@ export class TerminalHost {
 
   private scheduleTextDraw() {
     if (this.disposed) return;
-    // In Rust render mode, skip JS text draws entirely — the Rust VTE backend
-    // handles rendering via drawFrame(). We still flush the write buffer so
-    // the JS state stays current for search/selection.
     if (this.rustRenderMode) return;
     if (!this.textDrawQueued) {
       this.textDrawQueued = true;
@@ -1025,7 +1033,7 @@ export class TerminalHost {
   // Render — Overlay Layers (cursor + selection, drawn directly by host)
   // =========================================================================
   private scheduleOverlayDraw() {
-    if (this.disposed || this.rustRenderMode) return;
+    if (this.disposed) return;
     if (!this.overlayDrawQueued) {
       this.overlayDrawQueued = true;
       requestAnimationFrame(() => {
@@ -1058,7 +1066,8 @@ export class TerminalHost {
     }
 
     // OSC 8 URL underlines + hovered auto-detect URL underline
-    if (!this.core.modes.isAlternateScreen && this.core.viewportOffset === 0) {
+    // Skip in Rust render mode — JS VirtualCanvas has stale URL data.
+    if (!this.rustRenderMode && !this.core.modes.isAlternateScreen && this.core.viewportOffset === 0) {
       const vc = this.core.virtualCanvas;
       ctx.fillStyle = "#569cd6";
       ctx.globalAlpha = 0.85;

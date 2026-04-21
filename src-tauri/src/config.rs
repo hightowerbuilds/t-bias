@@ -118,6 +118,9 @@ pub struct Config {
     pub shells: ShellsConfig,
     #[serde(default)]
     pub keybindings: KeybindingsConfig,
+    /// Process names that use the Rust VTE renderer instead of canvas.
+    #[serde(default = "default_vte_apps")]
+    pub vte_apps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,8 +175,23 @@ impl Default for Config {
             theme: ThemeConfig::default(),
             shells: ShellsConfig::default(),
             keybindings: KeybindingsConfig::default(),
+            vte_apps: default_vte_apps(),
         }
     }
+}
+
+fn default_vte_apps() -> Vec<String> {
+    vec![
+        "Claude Code".to_string(),
+        "Codex".to_string(),
+        "Aider".to_string(),
+        "Gemini".to_string(),
+        "OpenCode".to_string(),
+        "Goose".to_string(),
+        "Cursor Agent".to_string(),
+        "Qodo".to_string(),
+        "Amp".to_string(),
+    ]
 }
 
 fn default_opacity() -> f64 {

@@ -14,6 +14,7 @@ import { usePromptStackerStore } from "./promptStackerStore";
 import { TabBar } from "./TabBar";
 import { ShellLanding } from "./ShellLanding";
 import { CloseConfirmDialog, type PendingClose } from "./CloseConfirmDialog";
+import Settings from "./Settings";
 import {
   useShellRegistry,
   isRestorableShell,
@@ -70,6 +71,7 @@ const App: Component = () => {
   const [appReady, setAppReady] = createSignal(false);
   const [shellLandingOpen, setShellLandingOpen] = createSignal(false);
   const [promptStackerOpen, setPromptStackerOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [pendingClose, setPendingClose] = createSignal<PendingClose | null>(null);
 
   const [tabs, setTabs] = createStore<TabState[]>([]);
@@ -695,7 +697,8 @@ const App: Component = () => {
             if (currentTab) toggleFlipPane(currentTab.activePaneId);
           }}
           onOpenShells={() => void openShellLanding()}
-          onOpenStacker={() => { setShellLandingOpen(false); setPromptStackerOpen(true); }}
+          onOpenStacker={() => { setShellLandingOpen(false); setSettingsOpen(false); setPromptStackerOpen(true); }}
+          onOpenSettings={() => { setShellLandingOpen(false); setPromptStackerOpen(false); setSettingsOpen(true); }}
         />
 
         <div style={{ flex: "1", position: "relative", overflow: "hidden" }}>
@@ -780,6 +783,28 @@ const App: Component = () => {
               onRestoreAll={restorePersistedShells}
               onNewShell={startNewShellWorkspace}
               onClose={() => setShellLandingOpen(false)}
+            />
+          </div>
+        </Show>
+
+        <Show when={settingsOpen()}>
+          <div
+            style={{
+              position: "fixed",
+              inset: "0",
+              background: "var(--bg-overlay)",
+              display: "flex",
+              "flex-direction": "column",
+              "z-index": "var(--z-stacker-modal)",
+              "min-height": "0",
+            }}
+          >
+            <Settings
+              config={config()!}
+              onClose={() => setSettingsOpen(false)}
+              onUpdateVteApps={(apps) => {
+                setConfig((prev) => prev ? { ...prev, vte_apps: apps } : prev);
+              }}
             />
           </div>
         </Show>

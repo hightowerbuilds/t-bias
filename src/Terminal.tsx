@@ -136,11 +136,11 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       invoke(RESIZE_PTY_CMD, { paneId: props.paneId, cols, rows });
     };
 
-    // PTY event listeners — registered per mount cycle.
+    // PTY event listeners — pty-output is kept for activity detection only.
+    // Rendering is handled exclusively by the Rust VT backend via frame events.
     const unlistenOutput = await listen(
       `pty-output-${props.paneId}`,
-      (event: any) => {
-        terminal!.write(event.payload as string);
+      (_event: any) => {
         if (!props.isActive) {
           props.onActivity?.();
         }
@@ -148,13 +148,14 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
     );
 
     const unlistenExit = await listen(`pty-exit-${props.paneId}`, () => {
-      terminal!.write("\r\n[Process exited]\r\n");
+      // Show exit message via Rust frame — feed it into the PTY writer
+      // so the Rust screen buffer processes it.
       props.onExit?.();
     });
 
-    // Rust frame rendering — when the Rust VT backend signals a new frame,
-    // fetch it via IPC and render it directly to canvas, bypassing the JS
-    // VT pipeline. This is the fast path for TUI apps.
+    // Rust frame rendering — the sole rendering path. The Rust VT backend
+    // processes raw PTY bytes natively (via vte crate) and sends complete
+    // screen frames to the frontend for canvas rendering.
     let rustFrameQueued = false;
     const unlistenFrame = await listen(`frame-ready-${props.paneId}`, () => {
       if (rustFrameQueued) return;
@@ -170,7 +171,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
             }
           }
         } catch {
-          // Frame fetch failed — JS pipeline handles rendering
+          // Frame fetch failed
         }
       });
     });

@@ -50,6 +50,7 @@ export interface AppConfig {
   theme: ConfigTheme;
   shells: ConfigShells;
   keybindings: ConfigKeybindings;
+  vte_apps: string[];
 }
 
 // ========================== Filesystem ==========================

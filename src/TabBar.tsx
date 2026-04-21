@@ -14,6 +14,7 @@ export const TabBar: Component<{
   onFlip: () => void;
   onOpenShells: () => void;
   onOpenStacker: () => void;
+  onOpenSettings: () => void;
 }> = (props) => {
   return (
     <div style={{
@@ -149,6 +150,21 @@ export const TabBar: Component<{
             "font-family": "var(--font-mono)",
           }}
         >Stacker</button>
+        <button
+          onClick={props.onOpenSettings}
+          title="Settings"
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--text-faint)",
+            cursor: "pointer",
+            padding: "0 12px",
+            "font-size": "11px",
+            height: "100%",
+            "border-left": "1px solid var(--border-separator)",
+            "font-family": "var(--font-mono)",
+          }}
+        >Settings</button>
       </div>
     </div>
   );

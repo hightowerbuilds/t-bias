@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
-use crate::screen::{ScreenState, SharedScreen};
+// screen.rs no longer used — xterm.js handles VT parsing on the frontend
 
 /// Maximum bytes to read in a single syscall.
 const READ_BUF_SIZE: usize = 65536; // 64KB
@@ -25,15 +25,12 @@ struct PaneState {
 
 pub struct PtyState {
     panes: Mutex<HashMap<u32, PaneState>>,
-    /// Per-pane Rust screen buffer — processes VT sequences natively.
-    screens: Mutex<HashMap<u32, SharedScreen>>,
 }
 
 impl PtyState {
     pub fn new() -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
-            screens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -148,11 +145,6 @@ pub fn spawn_shell(
 
     let closed = Arc::new(AtomicBool::new(false));
 
-    // Create Rust-native screen buffer for this pane
-    let screen: SharedScreen = Arc::new(Mutex::new(
-        ScreenState::new(cols as usize, rows as usize, 5000),
-    ));
-
     {
         let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
         panes.insert(
@@ -166,17 +158,11 @@ pub fn spawn_shell(
             },
         );
     }
-    {
-        let mut screens = state.screens.lock().map_err(|e| e.to_string())?;
-        screens.insert(pane_id, Arc::clone(&screen));
-    }
 
-    // Reader thread: feeds PTY output through the Rust VT processor and
-    // emits a frame-ready signal to the frontend. Also emits raw text for
-    // backward compatibility with the JS pipeline (search, selection, etc.).
+    // Reader thread: emits raw PTY output to the frontend.
+    // xterm.js handles all VT parsing and rendering on the frontend.
     let app_clone = app.clone();
     let out_event = format!("pty-output-{}", pane_id);
-    let frame_event = format!("frame-ready-{}", pane_id);
     std::thread::spawn(move || {
         let mut buf = vec![0u8; READ_BUF_SIZE];
         loop {
@@ -190,21 +176,9 @@ pub fn spawn_shell(
                         break;
                     }
 
-                    // Feed raw bytes through the Rust VT processor
-                    let is_sync = {
-                        let mut ss = screen.lock().unwrap();
-                        ss.process(&buf[..n]);
-                        ss.screen.is_sync_output()
-                    };
-
-                    // Emit raw text for the JS pipeline (backward compat)
+                    // Emit raw text — xterm.js handles VT parsing on frontend
                     let text = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = app_clone.emit(&out_event, text);
-
-                    // Signal that a new frame is available (unless in sync mode)
-                    if !is_sync {
-                        let _ = app_clone.emit(&frame_event, ());
-                    }
                 }
                 Err(_) => break,
             }
@@ -244,15 +218,6 @@ pub fn resize_pty(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    // Resize the Rust screen buffer
-    if let Ok(screens) = state.screens.lock() {
-        if let Some(screen) = screens.get(&pane_id) {
-            if let Ok(mut ss) = screen.lock() {
-                ss.screen.resize(cols as usize, rows as usize);
-            }
-        }
-    }
-
     // Resize the PTY
     let panes = state.panes.lock().map_err(|e| e.to_string())?;
     if let Some(pane) = panes.get(&pane_id) {
@@ -283,11 +248,6 @@ pub fn close_pane(
         let mut panes = state.panes.lock().map_err(|e| e.to_string())?;
         panes.remove(&pane_id)
     };
-
-    // Remove the screen buffer for this pane
-    if let Ok(mut screens) = state.screens.lock() {
-        screens.remove(&pane_id);
-    }
 
     if let Some(mut pane) = pane {
         // Signal the reader thread to stop emitting events *before* we start
@@ -370,51 +330,6 @@ pub fn get_pane_foreground_process_name(
 
     let exec_path = get_pid_executable_path(fg_pid).ok();
     Ok(Some(format_process_title(&process_name, exec_path.as_deref())))
-}
-
-/// Get the latest rendered frame from the Rust screen buffer.
-/// Returns None if the screen hasn't changed since the last call.
-#[tauri::command]
-pub fn get_frame(
-    state: tauri::State<'_, PtyState>,
-    pane_id: u32,
-) -> Result<Option<crate::screen::ScreenFrame>, String> {
-    let screens = state.screens.lock().map_err(|e| e.to_string())?;
-    let screen = match screens.get(&pane_id) {
-        Some(s) => s,
-        None => return Ok(None),
-    };
-    let mut ss = screen.lock().map_err(|e| e.to_string())?;
-    Ok(ss.screen.take_frame())
-}
-
-/// Scroll the Rust screen buffer viewport.
-#[tauri::command]
-pub fn scroll_viewport(
-    state: tauri::State<'_, PtyState>,
-    pane_id: u32,
-    delta: i32,
-) -> Result<(), String> {
-    let screens = state.screens.lock().map_err(|e| e.to_string())?;
-    if let Some(screen) = screens.get(&pane_id) {
-        let mut ss = screen.lock().map_err(|e| e.to_string())?;
-        ss.screen.scroll_viewport(delta);
-    }
-    Ok(())
-}
-
-/// Reset the Rust screen buffer viewport to the bottom.
-#[tauri::command]
-pub fn reset_viewport(
-    state: tauri::State<'_, PtyState>,
-    pane_id: u32,
-) -> Result<(), String> {
-    let screens = state.screens.lock().map_err(|e| e.to_string())?;
-    if let Some(screen) = screens.get(&pane_id) {
-        let mut ss = screen.lock().map_err(|e| e.to_string())?;
-        ss.screen.reset_viewport();
-    }
-    Ok(())
 }
 
 fn is_shell_process(name: &str) -> bool {

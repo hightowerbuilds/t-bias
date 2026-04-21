@@ -39,7 +39,7 @@ import {
   type SessionData,
   type ShellRecord,
 } from "./ipc/types";
-import { destroyTerminalHost } from "./Terminal";
+import { destroyTerminalHost, zoomTerminal, resetTerminalZoom } from "./Terminal";
 import {
   closeActivePaneInWorkspace,
   closeTabInWorkspace,
@@ -524,6 +524,23 @@ const App: Component = () => {
       if (currentTab) toggleFlipPane(currentTab.activePaneId);
       return;
     }
+    // Font zoom: Cmd+= (plus), Cmd+- (minus), Cmd+0 (reset)
+    if (e.key === "=" || e.key === "+") {
+      e.preventDefault(); e.stopPropagation();
+      const t = tab(); if (t) zoomTerminal(t.activePaneId, 2);
+      return;
+    }
+    if (e.key === "-") {
+      e.preventDefault(); e.stopPropagation();
+      const t = tab(); if (t) zoomTerminal(t.activePaneId, -2);
+      return;
+    }
+    if (e.key === "0" && !e.shiftKey && !e.altKey) {
+      e.preventDefault(); e.stopPropagation();
+      const t = tab(); if (t) resetTerminalZoom(t.activePaneId);
+      return;
+    }
+
     const key = e.key.toLowerCase();
     if (key === "e" && e.shiftKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void addFileExplorerTab(); return; }
 
@@ -617,19 +634,12 @@ const App: Component = () => {
     const savedSession = (await invoke(LOAD_SESSION_CMD).catch(() => null)) as SessionData | null;
     const hasLayout = savedSession?.tabs?.length != null && savedSession.tabs.length > 0;
 
-    if (cfg.shells.restore === "always") {
-      if (hasLayout) {
-        const { tabs: restoredTabs, activeTabIndex } = sessionDataToWorkspace(savedSession!, newId);
-        setTabs(restoredTabs);
-        setActiveTabId(restoredTabs[activeTabIndex]?.id ?? restoredTabs[0]?.id ?? 0);
-      } else if (restorable.length > 0) {
-        setWorkspaceTabs(makeTabsFromShellRecords(restorable));
-      } else {
-        setWorkspaceTabs([makeTab()]);
-      }
-    } else if (cfg.shells.restore === "ask" && (hasLayout || restorable.length > 0)) {
-      setShellLandingOpen(true);
+    if (cfg.shells.restore === "always" && hasLayout) {
+      const { tabs: restoredTabs, activeTabIndex } = sessionDataToWorkspace(savedSession!, newId);
+      setTabs(restoredTabs);
+      setActiveTabId(restoredTabs[activeTabIndex]?.id ?? restoredTabs[0]?.id ?? 0);
     } else {
+      // Always start with a fresh shell — cursor blinking, ready to go
       setWorkspaceTabs([makeTab()]);
     }
 

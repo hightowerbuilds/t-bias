@@ -165,43 +165,4 @@ export const GET_HOME_DIR_CMD         = "get_home_dir"         as const;
 export const RESOLVE_EXISTING_DIR_CMD = "resolve_existing_dir" as const;
 export const GET_PANE_CWD_CMD        = "get_pane_cwd"          as const;
 export const GET_PANE_FOREGROUND_PROCESS_NAME_CMD = "get_pane_foreground_process_name" as const;
-export const GET_FRAME_CMD            = "get_frame"             as const;
-export const SCROLL_VIEWPORT_CMD     = "scroll_viewport"       as const;
-export const RESET_VIEWPORT_CMD      = "reset_viewport"        as const;
 
-// ========================== Screen Frame (Rust → frontend) ==========================
-
-export interface FrameCellAttrs {
-  bold: boolean;
-  faint: boolean;
-  italic: boolean;
-  underline: number;
-  blink: boolean;
-  inverse: boolean;
-  hidden: boolean;
-  strikethrough: boolean;
-  overline: boolean;
-  wide: boolean;
-}
-
-export type FrameColor =
-  | { type: "Default" }
-  | { type: "Palette"; index: number }
-  | { type: "Rgb"; r: number; g: number; b: number };
-
-export interface FrameCell {
-  char: string;
-  fg: FrameColor;
-  bg: FrameColor;
-  attrs: FrameCellAttrs;
-}
-
-export interface ScreenFrame {
-  cols: number;
-  rows: number;
-  cells: FrameCell[];
-  cursor_x: number;
-  cursor_y: number;
-  cursor_visible: boolean;
-  title: string;
-}

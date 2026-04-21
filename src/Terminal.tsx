@@ -1,38 +1,26 @@
 import { onMount, onCleanup, createSignal, createEffect, type Component } from "solid-js";
-import { TerminalHost } from "./terminal/TerminalHost";
+import { XtermHost } from "./terminal/XtermHost";
+import "@xterm/xterm/css/xterm.css";
 import {
   SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD,
   GET_PANE_FOREGROUND_PROCESS_NAME_CMD,
-  GET_FRAME_CMD,
-  SCROLL_VIEWPORT_CMD,
   RESOLVE_EXISTING_DIR_CMD,
   CREATE_SHELL_RECORD_CMD,
   ATTACH_SHELL_RECORD_CMD,
   type ShellRecord,
   type ResolvedDirectory,
   type AppConfig,
-  type ScreenFrame,
 } from "./ipc/types";
 
 const { invoke } = (window as any).__TAURI__.core;
 const { listen } = (window as any).__TAURI__.event;
 
 // ---------------------------------------------------------------------------
-// TerminalHost cache — preserves screen state across component remounts
-// ---------------------------------------------------------------------------
-// When the pane tree restructures (e.g. splits), Solid's Switch/Match tears
-// down the old TerminalView and mounts a new one for the same pane ID. Without
-// this cache, the new component would create a fresh TerminalHost with a blank
-// screen, even though the PTY is still alive.
-//
-// On unmount the host is detached (DOM cleanup, timers stopped) but its core
-// state (screen buffer, scrollback, glyph atlas) is preserved. On remount the
-// host is reattached to the new canvas element and redrawn.
+// XtermHost cache — preserves terminal state across component remounts
 // ---------------------------------------------------------------------------
 
-const hostCache = new Map<number, TerminalHost>();
+const hostCache = new Map<number, XtermHost>();
 
-/** Permanently destroy a cached TerminalHost. Call when the PTY is closed. */
 export function destroyTerminalHost(paneId: number) {
   const host = hostCache.get(paneId);
   if (host) {
@@ -41,46 +29,45 @@ export function destroyTerminalHost(paneId: number) {
   }
 }
 
+export function zoomTerminal(paneId: number, delta: number) {
+  hostCache.get(paneId)?.zoom(delta);
+}
+
+export function resetTerminalZoom(paneId: number) {
+  hostCache.get(paneId)?.resetZoom();
+}
+
 export interface TerminalViewProps {
-  /** Unique pane ID — used as the PTY identifier and event-name suffix. */
   paneId: number;
   config: AppConfig;
   initialCwd?: string;
   shellId?: string;
   initialTitle?: string;
   defaultPersistOnQuit?: boolean;
-  /** Whether this pane currently has keyboard focus. */
   isActive: boolean;
-  /** Called when the shell emits an OSC title change. */
   onTitleChange?: (title: string) => void;
-  /** Called when the foreground process in the PTY changes. */
   onProcessTitleChange?: (title: string | null) => void;
-  /** Called when output arrives while the pane is not active. */
   onActivity?: () => void;
-  /** Called when the shell reports a working directory change (OSC 7). */
   onCwdChange?: (cwd: string) => void;
-  /** Called when a durable shell record is created or reattached. */
   onShellRecordReady?: (record: ShellRecord) => void;
-  /** Called when the PTY process exits. */
   onExit?: () => void;
 }
 
 const TerminalView: Component<TerminalViewProps> = (props) => {
-  let textCanvasRef!: HTMLCanvasElement;
-  let terminal: TerminalHost | undefined;
+  let containerRef!: HTMLDivElement;
+  let terminal: XtermHost | undefined;
   let processTitlePoll: number | undefined;
   const [terminalReady, setTerminalReady] = createSignal(false);
 
   onMount(async () => {
     const config = props.config;
 
-    // Check for a cached host from a previous mount (e.g. after a split).
     const cached = hostCache.get(props.paneId);
     if (cached) {
       terminal = cached;
-      terminal.reattach(textCanvasRef);
+      terminal.reattach(containerRef);
     } else {
-      terminal = new TerminalHost(textCanvasRef, {
+      terminal = new XtermHost(containerRef, {
         fontSize: config.font.size,
         fontFamily: config.font.family,
         scrollbackLimit: config.scrollback_limit,
@@ -98,38 +85,11 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       hostCache.set(props.paneId, terminal);
     }
 
-    // Signal that the terminal object exists so focus/resize can fire.
     setTerminalReady(true);
 
-    // Enable Rust render mode immediately — prevents the JS text draw
-    // pipeline from ever firing, avoiding the race where JS draws before
-    // the first Rust frame arrives.
-    terminal.rustRenderMode = true;
-
-    // Always (re-)wire callbacks — they reference props from this mount cycle.
+    // Wire callbacks
     terminal.onData = (data) => {
       invoke(WRITE_TO_PTY_CMD, { paneId: props.paneId, data });
-      // Reset viewport to bottom on any user input
-      invoke("reset_viewport", { paneId: props.paneId }).catch(() => {});
-    };
-
-    terminal.core.onClipboard = (text) => {
-      navigator.clipboard.writeText(text);
-    };
-
-    terminal.core.onClipboardRead = async () => {
-      // Read via Tauri clipboard plugin to avoid WebKit permission prompts.
-      const tauri = (window as any).__TAURI__;
-      if (tauri?.core?.invoke) {
-        try {
-          const text = await tauri.core.invoke("plugin:clipboard-manager|read_text");
-          return typeof text === "string" ? text : null;
-        } catch { /* fall through */ }
-      }
-      if (navigator.clipboard?.readText) {
-        return await navigator.clipboard.readText();
-      }
-      return null;
     };
 
     terminal.onTitleChange = (title) => {
@@ -144,17 +104,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       invoke(RESIZE_PTY_CMD, { paneId: props.paneId, cols, rows });
     };
 
-    terminal.onScroll = (delta) => {
-      invoke(SCROLL_VIEWPORT_CMD, { paneId: props.paneId, delta }).then(() => {
-        // After scrolling, fetch the new frame immediately
-        invoke(GET_FRAME_CMD, { paneId: props.paneId }).then((frame: any) => {
-          if (frame && terminal) terminal.drawFrame(frame);
-        }).catch(() => {});
-      }).catch(() => {});
-    };
-
-    // PTY event listeners — feed data to JS pipeline for scroll/selection/copy,
-    // but text rendering is handled by the Rust VT backend via frame events.
+    // PTY output → xterm.js (xterm handles all VT parsing and rendering)
     const unlistenOutput = await listen(
       `pty-output-${props.paneId}`,
       (event: any) => {
@@ -166,35 +116,10 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
     );
 
     const unlistenExit = await listen(`pty-exit-${props.paneId}`, () => {
-      // Show exit message via Rust frame — feed it into the PTY writer
-      // so the Rust screen buffer processes it.
       props.onExit?.();
     });
 
-    // Rust frame rendering — the sole rendering path. The Rust VT backend
-    // processes raw PTY bytes natively (via vte crate) and sends complete
-    // screen frames to the frontend for canvas rendering.
-    let rustFrameQueued = false;
-    const unlistenFrame = await listen(`frame-ready-${props.paneId}`, () => {
-      if (rustFrameQueued) return;
-      rustFrameQueued = true;
-      requestAnimationFrame(async () => {
-        rustFrameQueued = false;
-        try {
-          const frame = (await invoke(GET_FRAME_CMD, { paneId: props.paneId })) as ScreenFrame | null;
-          if (frame && terminal) {
-            terminal.drawFrame(frame);
-            if (frame.title) {
-              props.onTitleChange?.(frame.title);
-            }
-          }
-        } catch {
-          // Frame fetch failed
-        }
-      });
-    });
-
-    // Only spawn a shell if this is a fresh host (not a reattach).
+    // Spawn shell if this is a fresh host (not a reattach)
     if (!cached) {
       const shell = config.shell || undefined;
       const { cols, rows } = terminal.gridSize;
@@ -223,9 +148,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
                 persistOnQuit: props.defaultPersistOnQuit,
               })) as ShellRecord;
           props.onShellRecordReady?.(shellRecord);
-        } catch {
-          // If shell logging fails, keep the terminal usable.
-        }
+        } catch {}
         await invoke(SPAWN_SHELL_CMD, {
           paneId: props.paneId,
           cols,
@@ -238,6 +161,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       }
     }
 
+    // Poll foreground process title
     let lastProcessTitle: string | null | undefined;
     const pollForegroundProcessTitle = async () => {
       try {
@@ -249,9 +173,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
           lastProcessTitle = title;
           props.onProcessTitleChange?.(title);
         }
-      } catch {
-        // Ignore polling failures; the shell title path still works.
-      }
+      } catch {}
     };
 
     void pollForegroundProcessTitle();
@@ -259,28 +181,19 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       void pollForegroundProcessTitle();
     }, 1200);
 
-    // ResizeObserver keeps each pane's grid in sync with its container size.
-    // This covers both window resizes and pane-divider drags without needing
-    // a global window.resize handler.
+    // ResizeObserver for pane resize / window resize
     const ro = new ResizeObserver(() => terminal?.fit());
-    const container = textCanvasRef.parentElement;
-    if (container) ro.observe(container);
+    ro.observe(containerRef);
 
     onCleanup(() => {
       ro.disconnect();
       unlistenOutput();
       unlistenExit();
-      unlistenFrame();
       if (processTitlePoll !== undefined) window.clearInterval(processTitlePoll);
-      // Detach (not dispose) — the host stays in hostCache so it can be
-      // reattached if this pane remounts after a tree restructure.
-      // Permanent disposal happens via destroyTerminalHost() when the PTY
-      // is actually closed by App.tsx.
       terminal?.detach();
     });
   });
 
-  // Focus the terminal whenever this pane becomes active.
   createEffect(() => {
     if (props.isActive && terminalReady()) {
       terminal!.focus();
@@ -289,6 +202,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
 
   return (
     <div
+      ref={containerRef}
       style={{
         position: "relative",
         width: "100%",
@@ -296,21 +210,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
         overflow: "hidden",
         background: props.config.theme.background,
       }}
-    >
-      {/* Layer 0: Text + Backgrounds — the IRenderer draws here */}
-      <canvas
-        ref={textCanvasRef}
-        style={{
-          position: "absolute",
-          top: "0",
-          left: "0",
-          width: "100%",
-          height: "100%",
-          display: "block",
-        }}
-      />
-      {/* Layers 1 & 2 (selection + cursor) created dynamically by TerminalHost */}
-    </div>
+    />
   );
 };
 

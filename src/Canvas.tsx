@@ -239,14 +239,15 @@ const CanvasModal: Component<CanvasModalProps> = (props) => {
           title="Close Canvas (Esc)"
           style={{
             background: "none",
-            border: "none",
-            color: "var(--text-faint)",
+            border: "1px solid var(--border)",
+            color: "#cdd6f4",
             cursor: "pointer",
-            "font-size": "16px",
+            "font-size": "11px",
             "font-family": "var(--font-mono)",
-            padding: "4px 8px",
+            padding: "4px 12px",
+            "border-radius": "3px",
           }}
-        >���</button>
+        >Close</button>
       </div>
 
       {/* ---- Canvas area ---- */}

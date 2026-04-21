@@ -13,6 +13,18 @@ export interface CanvasEdge {
   toNodeId: string;
 }
 
+export interface CanvasStroke {
+  id: string;
+  points: { x: number; y: number }[];
+}
+
+export interface CanvasLabel {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+}
+
 export interface CanvasViewport {
   panX: number;
   panY: number;
@@ -22,6 +34,8 @@ export interface CanvasViewport {
 export interface CanvasDocument {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+  strokes: CanvasStroke[];
+  labels: CanvasLabel[];
   viewport: CanvasViewport;
 }
 
@@ -29,6 +43,8 @@ export function emptyCanvasDocument(): CanvasDocument {
   return {
     nodes: [],
     edges: [],
+    strokes: [],
+    labels: [],
     viewport: { panX: 0, panY: 0, zoom: 1.0 },
   };
 }

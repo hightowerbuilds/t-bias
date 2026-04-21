@@ -45,8 +45,11 @@ const FOOTER_H = 40;
 
 const toolDefs: { id: CanvasTool; label: string; shortcut: string }[] = [
   { id: "select",    label: "Select",    shortcut: "V" },
+  { id: "lasso",     label: "Lasso",     shortcut: "S" },
   { id: "rectangle", label: "Rectangle", shortcut: "R" },
   { id: "connect",   label: "Connect",   shortcut: "L" },
+  { id: "marker",    label: "Marker",    shortcut: "M" },
+  { id: "text",      label: "Text",      shortcut: "T" },
   { id: "pan",       label: "Pan",       shortcut: "H" },
 ];
 
@@ -73,6 +76,18 @@ const CanvasModal: Component<CanvasModalProps> = (props) => {
   } | null>(null);
   let editTextRef!: HTMLTextAreaElement;
 
+  // Text tool placement / label editing
+  const [textInput, setTextInput] = createSignal<{
+    type: "new" | "edit";
+    labelId?: string;
+    screenX: number;
+    screenY: number;
+    worldX: number;
+    worldY: number;
+    text: string;
+  } | null>(null);
+  let textInputRef!: HTMLInputElement;
+
   onMount(() => {
     host = new CanvasHost(canvasRef, {
       background: props.config.theme.background,
@@ -85,6 +100,16 @@ const CanvasModal: Component<CanvasModalProps> = (props) => {
         editTextRef?.focus();
         editTextRef?.select();
       });
+    };
+
+    host.onTextPlaceRequest = (screenX, screenY, worldX, worldY) => {
+      setTextInput({ type: "new", screenX, screenY, worldX, worldY, text: "" });
+      requestAnimationFrame(() => textInputRef?.focus());
+    };
+
+    host.onLabelEditRequest = (labelId, screenX, screenY, currentText) => {
+      setTextInput({ type: "edit", labelId, screenX, screenY, worldX: 0, worldY: 0, text: currentText });
+      requestAnimationFrame(() => { textInputRef?.focus(); textInputRef?.select(); });
     };
 
     const ro = new ResizeObserver(() => host?.fit());
@@ -267,8 +292,11 @@ const CanvasModal: Component<CanvasModalProps> = (props) => {
             if (e.target !== canvasRef) return;
             const key = e.key.toLowerCase();
             if (key === "v") selectTool("select");
+            else if (key === "s") selectTool("lasso");
             else if (key === "r") selectTool("rectangle");
             else if (key === "l") selectTool("connect");
+            else if (key === "m") selectTool("marker");
+            else if (key === "t") selectTool("text");
             else if (key === "h") selectTool("pan");
           }}
         />
@@ -318,6 +346,63 @@ const CanvasModal: Component<CanvasModalProps> = (props) => {
                   if (editNode() && document.activeElement !== editTextRef) {
                     host?.commitEdit(en().nodeId, editTextRef.value);
                     setEditNode(null);
+                  }
+                }, 300);
+              }}
+            />
+          )}
+        </Show>
+
+        {/* Text tool input — appears where user clicks */}
+        <Show when={textInput()}>
+          {(ti) => (
+            <input
+              ref={textInputRef}
+              value={ti().text}
+              onInput={(e) => setTextInput({ ...ti(), text: e.currentTarget.value })}
+              placeholder="Type here..."
+              style={{
+                position: "absolute",
+                left: `${ti().screenX}px`,
+                top: `${ti().screenY - 20}px`,
+                background: "transparent",
+                border: "none",
+                "border-bottom": "1px solid #5b8aff",
+                color: "#cdd6f4",
+                "font-family": "var(--font-mono)",
+                "font-size": "14px",
+                padding: "2px 4px",
+                outline: "none",
+                "min-width": "100px",
+                "z-index": "20",
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const t = ti();
+                  if (t.type === "new") {
+                    host?.addLabel(t.worldX, t.worldY, textInputRef.value);
+                  } else if (t.type === "edit" && t.labelId) {
+                    host?.updateLabel(t.labelId, textInputRef.value);
+                  }
+                  setTextInput(null);
+                }
+                if (e.key === "Escape") {
+                  if (ti().type === "edit") host?.cancelEdit();
+                  setTextInput(null);
+                  host?.focus();
+                }
+                e.stopPropagation();
+              }}
+              onBlur={() => {
+                setTimeout(() => {
+                  const t = textInput();
+                  if (t && document.activeElement !== textInputRef) {
+                    if (t.type === "new") {
+                      host?.addLabel(t.worldX, t.worldY, textInputRef.value);
+                    } else if (t.type === "edit" && t.labelId) {
+                      host?.updateLabel(t.labelId, textInputRef.value);
+                    }
+                    setTextInput(null);
                   }
                 }, 300);
               }}

@@ -2,10 +2,12 @@ import {
   type CanvasDocument,
   type CanvasNode,
   type CanvasEdge,
+  type CanvasStroke,
+  type CanvasLabel,
   emptyCanvasDocument,
 } from "./CanvasData";
 
-export type CanvasTool = "select" | "rectangle" | "connect" | "pan";
+export type CanvasTool = "select" | "lasso" | "rectangle" | "connect" | "pan" | "marker" | "text";
 
 type Mode =
   | "idle"
@@ -14,6 +16,9 @@ type Mode =
   | "creating-node"
   | "connecting"
   | "resizing-node"
+  | "drawing"
+  | "lassoing"
+  | "dragging-label"
   | "editing-text";
 
 type ResizeHandle = "nw" | "ne" | "sw" | "se";
@@ -31,6 +36,8 @@ const NODE_TEXT = "#cdd6f4";
 const EDGE_COLOR = "#585b70";
 const GRID_DOT = "#313244";
 const BG = "#11111b";
+const MARKER_COLOR = "#f5f5dc"; // beige
+const MARKER_WIDTH = 3;
 
 export interface CanvasHostOptions {
   background?: string;
@@ -53,6 +60,14 @@ export class CanvasHost {
   private background: string;
   private resizeHandle: ResizeHandle | null = null;
   private resizeOrigRect = { x: 0, y: 0, w: 0, h: 0 };
+  private activeStroke: CanvasStroke | null = null;
+  private selectedStrokeId: string | null = null;
+  private selectedStrokeIds: Set<string> = new Set();
+  private selectedLabelId: string | null = null;
+  private lassoOriginX = 0;
+  private lassoOriginY = 0;
+  private lassoEndX = 0;
+  private lassoEndY = 0;
 
   // Drag state
   private dragStartX = 0;
@@ -69,6 +84,10 @@ export class CanvasHost {
   onToolChange?: (tool: CanvasTool) => void;
   /** Fired when user double-clicks a node. Parent should show a text input overlay. */
   onEditRequest?: (nodeId: string, screenRect: { x: number; y: number; w: number; h: number }, currentText: string) => void;
+  /** Fired when user clicks with the text tool. Parent should show a text input at this screen position. */
+  onTextPlaceRequest?: (screenX: number, screenY: number, worldX: number, worldY: number) => void;
+  /** Fired when user double-clicks a label to edit it. */
+  onLabelEditRequest?: (labelId: string, screenX: number, screenY: number, currentText: string) => void;
 
   get tool(): CanvasTool { return this.activeTool; }
 
@@ -81,10 +100,14 @@ export class CanvasHost {
   private updateCursor() {
     if (this.spaceHeld || this.activeTool === "pan") {
       this.canvas.style.cursor = "grab";
-    } else if (this.activeTool === "rectangle") {
+    } else if (this.activeTool === "rectangle" || this.activeTool === "connect") {
       this.canvas.style.cursor = "crosshair";
-    } else if (this.activeTool === "connect") {
+    } else if (this.activeTool === "lasso") {
       this.canvas.style.cursor = "crosshair";
+    } else if (this.activeTool === "marker") {
+      this.canvas.style.cursor = "crosshair";
+    } else if (this.activeTool === "text") {
+      this.canvas.style.cursor = "text";
     } else {
       this.canvas.style.cursor = this.hoveredNodeId ? "move" : "default";
     }
@@ -195,7 +218,50 @@ export class CanvasHost {
     return !(innerX && innerY);
   }
 
+  /** Check if a world-space point is near a text label. */
+  private hitTestLabel(wx: number, wy: number): CanvasLabel | null {
+    const labels = this.doc.labels || [];
+    const fontSize = 14;
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const l = labels[i];
+      // Approximate label bounds: width from text length, height from font size
+      const approxW = l.text.length * fontSize * 0.6;
+      const approxH = fontSize * 1.4;
+      if (wx >= l.x - 4 && wx <= l.x + approxW + 4 && wy >= l.y - approxH && wy <= l.y + 4) {
+        return l;
+      }
+    }
+    return null;
+  }
+
   /** Check if a world-space point is over a resize handle of the selected node. */
+  /** Check if a world-space point is near any stroke. Returns stroke id or null. */
+  private hitTestStroke(wx: number, wy: number): string | null {
+    const threshold = 8 / this.doc.viewport.zoom;
+    const strokes = this.doc.strokes || [];
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      const stroke = strokes[i];
+      for (let j = 1; j < stroke.points.length; j++) {
+        const a = stroke.points[j - 1];
+        const b = stroke.points[j];
+        if (this.pointToSegmentDist(wx, wy, a.x, a.y, b.x, b.y) < threshold) {
+          return stroke.id;
+        }
+      }
+    }
+    return null;
+  }
+
+  private pointToSegmentDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+    let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
   private hitResizeHandle(wx: number, wy: number): ResizeHandle | null {
     if (!this.selectedNodeId) return null;
     const node = this.doc.nodes.find((n) => n.id === this.selectedNodeId);
@@ -261,6 +327,34 @@ export class CanvasHost {
       return;
     }
 
+    if (this.activeTool === "lasso") {
+      this.mode = "lassoing";
+      this.lassoOriginX = wx;
+      this.lassoOriginY = wy;
+      this.lassoEndX = wx;
+      this.lassoEndY = wy;
+      this.selectedStrokeIds.clear();
+      this.selectedStrokeId = null;
+      this.selectedNodeId = null;
+      this.scheduleDraw();
+      return;
+    }
+
+    if (this.activeTool === "text") {
+      this.onTextPlaceRequest?.(sx, sy, wx, wy);
+      return;
+    }
+
+    if (this.activeTool === "marker") {
+      this.mode = "drawing";
+      this.activeStroke = {
+        id: crypto.randomUUID(),
+        points: [{ x: wx, y: wy }],
+      };
+      this.scheduleDraw();
+      return;
+    }
+
     if (this.activeTool === "connect") {
       const hitNode = this.hitTestNode(wx, wy);
       if (hitNode) {
@@ -276,6 +370,7 @@ export class CanvasHost {
     const hitNode = this.hitTestNode(wx, wy);
     if (hitNode) {
       this.selectedNodeId = hitNode.id;
+      this.selectedStrokeId = null;
       this.mode = "dragging-node";
       this.dragNodeOffX = wx - hitNode.x;
       this.dragNodeOffY = wy - hitNode.y;
@@ -283,8 +378,33 @@ export class CanvasHost {
       return;
     }
 
-    // Click empty area → deselect
+    // Check if clicking a label → select + start drag
+    const hitLabel = this.hitTestLabel(wx, wy);
+    if (hitLabel) {
+      this.selectedLabelId = hitLabel.id;
+      this.selectedNodeId = null;
+      this.selectedStrokeId = null;
+      this.mode = "dragging-label";
+      this.dragNodeOffX = wx - hitLabel.x;
+      this.dragNodeOffY = wy - hitLabel.y;
+      this.scheduleDraw();
+      return;
+    }
+
+    // Check if clicking a stroke
+    const hitStroke = this.hitTestStroke(wx, wy);
+    if (hitStroke) {
+      this.selectedStrokeId = hitStroke;
+      this.selectedNodeId = null;
+      this.selectedLabelId = null;
+      this.scheduleDraw();
+      return;
+    }
+
+    // Click empty area → deselect all
     this.selectedNodeId = null;
+    this.selectedStrokeId = null;
+    this.selectedLabelId = null;
     this.scheduleDraw();
   };
 
@@ -313,6 +433,29 @@ export class CanvasHost {
         node.y = wy - this.dragNodeOffY;
         this.scheduleDraw();
       }
+      return;
+    }
+
+    if (this.mode === "dragging-label") {
+      const label = (this.doc.labels || []).find((l) => l.id === this.selectedLabelId);
+      if (label) {
+        label.x = wx - this.dragNodeOffX;
+        label.y = wy - this.dragNodeOffY;
+        this.scheduleDraw();
+      }
+      return;
+    }
+
+    if (this.mode === "lassoing") {
+      this.lassoEndX = wx;
+      this.lassoEndY = wy;
+      this.scheduleDraw();
+      return;
+    }
+
+    if (this.mode === "drawing" && this.activeStroke) {
+      this.activeStroke.points.push({ x: wx, y: wy });
+      this.scheduleDraw();
       return;
     }
 
@@ -405,6 +548,35 @@ export class CanvasHost {
       }
     }
 
+    if (this.mode === "lassoing") {
+      const lx = Math.min(this.lassoOriginX, this.lassoEndX);
+      const ly = Math.min(this.lassoOriginY, this.lassoEndY);
+      const lw = Math.abs(this.lassoEndX - this.lassoOriginX);
+      const lh = Math.abs(this.lassoEndY - this.lassoOriginY);
+
+      this.selectedStrokeIds.clear();
+      this.selectedNodeId = null;
+      if (lw > 2 && lh > 2) {
+        for (const stroke of (this.doc.strokes || [])) {
+          for (const p of stroke.points) {
+            if (p.x >= lx && p.x <= lx + lw && p.y >= ly && p.y <= ly + lh) {
+              this.selectedStrokeIds.add(stroke.id);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (this.mode === "drawing" && this.activeStroke) {
+      if (this.activeStroke.points.length > 1) {
+        if (!this.doc.strokes) this.doc.strokes = [];
+        this.doc.strokes.push(this.activeStroke);
+        this.notifyChange();
+      }
+      this.activeStroke = null;
+    }
+
     if (this.mode === "connecting") {
       const targetNode = this.hitTestNode(wx, wy);
       if (targetNode && targetNode.id !== this.connectFromId && this.connectFromId) {
@@ -424,7 +596,7 @@ export class CanvasHost {
       }
     }
 
-    if (this.mode === "dragging-node" || this.mode === "resizing-node") {
+    if (this.mode === "dragging-node" || this.mode === "resizing-node" || this.mode === "dragging-label") {
       this.notifyChange();
     }
 
@@ -468,15 +640,35 @@ export class CanvasHost {
       this.canvas.style.cursor = "crosshair";
       return;
     }
-    if ((e.key === "Backspace" || e.key === "Delete") && this.selectedNodeId && this.mode !== "editing-text") {
-      e.preventDefault();
-      this.doc.edges = this.doc.edges.filter(
-        (edge) => edge.fromNodeId !== this.selectedNodeId && edge.toNodeId !== this.selectedNodeId,
-      );
-      this.doc.nodes = this.doc.nodes.filter((n) => n.id !== this.selectedNodeId);
-      this.selectedNodeId = null;
-      this.notifyChange();
-      this.scheduleDraw();
+    if ((e.key === "Backspace" || e.key === "Delete") && this.mode !== "editing-text") {
+      if (this.selectedNodeId) {
+        e.preventDefault();
+        this.doc.edges = this.doc.edges.filter(
+          (edge) => edge.fromNodeId !== this.selectedNodeId && edge.toNodeId !== this.selectedNodeId,
+        );
+        this.doc.nodes = this.doc.nodes.filter((n) => n.id !== this.selectedNodeId);
+        this.selectedNodeId = null;
+        this.notifyChange();
+        this.scheduleDraw();
+      } else if (this.selectedStrokeId) {
+        e.preventDefault();
+        this.doc.strokes = (this.doc.strokes || []).filter((s) => s.id !== this.selectedStrokeId);
+        this.selectedStrokeId = null;
+        this.notifyChange();
+        this.scheduleDraw();
+      } else if (this.selectedLabelId) {
+        e.preventDefault();
+        this.doc.labels = (this.doc.labels || []).filter((l) => l.id !== this.selectedLabelId);
+        this.selectedLabelId = null;
+        this.notifyChange();
+        this.scheduleDraw();
+      } else if (this.selectedStrokeIds.size > 0) {
+        e.preventDefault();
+        this.doc.strokes = (this.doc.strokes || []).filter((s) => !this.selectedStrokeIds.has(s.id));
+        this.selectedStrokeIds.clear();
+        this.notifyChange();
+        this.scheduleDraw();
+      }
     }
   };
 
@@ -486,6 +678,17 @@ export class CanvasHost {
     const sy = e.clientY - rect.top;
     const wx = this.screenToWorldX(sx);
     const wy = this.screenToWorldY(sy);
+
+    // Double-click label → edit
+    const label = this.hitTestLabel(wx, wy);
+    if (label) {
+      this.selectedLabelId = label.id;
+      this.mode = "editing-text";
+      this.onLabelEditRequest?.(label.id, this.worldToScreenX(label.x), this.worldToScreenY(label.y), label.text);
+      return;
+    }
+
+    // Double-click node → edit
     const node = this.hitTestNode(wx, wy);
     if (node) {
       this.requestTextEdit(node);
@@ -529,6 +732,37 @@ export class CanvasHost {
     this.canvas.focus();
   }
 
+  /** Called by the parent to add a new text label at world coordinates. */
+  addLabel(worldX: number, worldY: number, text: string) {
+    if (!text.trim()) return;
+    if (!this.doc.labels) this.doc.labels = [];
+    this.doc.labels.push({
+      id: crypto.randomUUID(),
+      x: worldX,
+      y: worldY,
+      text: text.trim(),
+    });
+    this.notifyChange();
+    this.scheduleDraw();
+  }
+
+  /** Called by the parent to update an existing label's text. */
+  updateLabel(labelId: string, text: string) {
+    const labels = this.doc.labels || [];
+    const label = labels.find((l) => l.id === labelId);
+    if (label) {
+      if (!text.trim()) {
+        this.doc.labels = labels.filter((l) => l.id !== labelId);
+      } else {
+        label.text = text.trim();
+      }
+      this.notifyChange();
+      this.scheduleDraw();
+    }
+    this.mode = "idle";
+    this.canvas.focus();
+  }
+
   /** Called by the parent if the user cancels editing. */
   cancelEdit() {
     this.mode = "idle";
@@ -562,12 +796,38 @@ export class CanvasHost {
     ctx.scale(zoom, zoom);
 
     this.drawGrid();
+    this.drawStrokes();
+    this.drawLabels();
+    this.drawLassoPreview();
     this.drawEdges();
     this.drawCreationPreview();
     this.drawConnectionPreview();
     this.drawNodes();
 
     ctx.restore();
+  }
+
+  private drawStrokes() {
+    const { ctx } = this;
+    const allStrokes = [...(this.doc.strokes || [])];
+    if (this.activeStroke) allStrokes.push(this.activeStroke);
+    if (allStrokes.length === 0) return;
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    for (const stroke of allStrokes) {
+      if (stroke.points.length < 2) continue;
+      const selected = stroke.id === this.selectedStrokeId || this.selectedStrokeIds.has(stroke.id);
+      ctx.strokeStyle = selected ? "#5b8aff" : MARKER_COLOR;
+      ctx.lineWidth = (selected ? MARKER_WIDTH + 1 : MARKER_WIDTH) / this.doc.viewport.zoom;
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      }
+      ctx.stroke();
+    }
   }
 
   private drawGrid() {
@@ -664,6 +924,48 @@ export class CanvasHost {
         }
       }
     }
+  }
+
+  private drawLabels() {
+    const labels = this.doc.labels || [];
+    if (labels.length === 0) return;
+    const { ctx } = this;
+    const fontSize = 14;
+    ctx.font = `${fontSize}px monospace`;
+    ctx.textBaseline = "bottom";
+
+    for (const label of labels) {
+      if (this.mode === "editing-text" && label.id === this.selectedLabelId) continue;
+      const selected = label.id === this.selectedLabelId;
+      ctx.fillStyle = selected ? "#5b8aff" : "#cdd6f4";
+      ctx.fillText(label.text, label.x, label.y);
+
+      if (selected) {
+        const w = ctx.measureText(label.text).width;
+        ctx.strokeStyle = "#5b8aff";
+        ctx.lineWidth = 1 / this.doc.viewport.zoom;
+        ctx.setLineDash([4 / this.doc.viewport.zoom]);
+        ctx.strokeRect(label.x - 2, label.y - fontSize - 2, w + 4, fontSize + 4);
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  private drawLassoPreview() {
+    if (this.mode !== "lassoing") return;
+    const { ctx } = this;
+    const x = Math.min(this.lassoOriginX, this.lassoEndX);
+    const y = Math.min(this.lassoOriginY, this.lassoEndY);
+    const w = Math.abs(this.lassoEndX - this.lassoOriginX);
+    const h = Math.abs(this.lassoEndY - this.lassoOriginY);
+
+    ctx.strokeStyle = "#5b8aff";
+    ctx.lineWidth = 1 / this.doc.viewport.zoom;
+    ctx.setLineDash([6 / this.doc.viewport.zoom]);
+    ctx.fillStyle = "rgba(91, 138, 255, 0.08)";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
   }
 
   private drawCreationPreview() {

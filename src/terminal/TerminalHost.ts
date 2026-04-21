@@ -921,6 +921,11 @@ export class TerminalHost {
         this.core.scrollViewport(rowDelta);
         this.scheduleTextDraw();
         this.scheduleOverlayDraw();
+        // Returned to live view — resume Rust rendering if applicable
+        if (this.core.viewportOffset === 0) {
+          this.scrollPixelAccum = 0;
+          if (this.rustRenderMode && this.onScroll) this.onScroll(0);
+        }
       }
     }
   };
@@ -935,6 +940,10 @@ export class TerminalHost {
       this.core.scrollViewport(delta);
       this.scheduleTextDraw();
       this.scheduleOverlayDraw();
+    }
+    // Snap to live — resume Rust rendering if applicable
+    if (this.core.viewportOffset === 0 && this.rustRenderMode && this.onScroll) {
+      this.onScroll(0);
     }
   }
 

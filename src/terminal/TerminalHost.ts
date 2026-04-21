@@ -58,6 +58,9 @@ export class TerminalHost {
   private textDrawQueued = false;
   private overlayDrawQueued = false;
   private syncMode = false;
+  /** When true, the JS text draw pipeline is disabled — rendering is handled
+   *  exclusively by the Rust VTE backend via drawFrame(). */
+  private rustRenderMode = false;
   private lastScrollbackLen = 0;
   private writesSinceLastFrame = 0;
   private bytesSinceLastFrame = 0;
@@ -272,9 +275,11 @@ export class TerminalHost {
     return this.renderer.cellHeight;
   }
 
-  /** Render a ScreenFrame from the Rust VT backend directly to the canvas. */
+  /** Render a ScreenFrame from the Rust VT backend directly to the canvas.
+   *  Enables Rust render mode, disabling the JS text draw pipeline. */
   drawFrame(frame: import("../ipc/types").ScreenFrame) {
     if (this.disposed) return;
+    this.rustRenderMode = true;
     if (this.renderer instanceof CanvasRenderer) {
       (this.renderer as CanvasRenderer).drawFrame(frame);
     }
@@ -988,6 +993,10 @@ export class TerminalHost {
 
   private scheduleTextDraw() {
     if (this.disposed) return;
+    // In Rust render mode, skip JS text draws entirely — the Rust VTE backend
+    // handles rendering via drawFrame(). We still flush the write buffer so
+    // the JS state stays current for search/selection.
+    if (this.rustRenderMode) return;
     if (!this.textDrawQueued) {
       this.textDrawQueued = true;
       requestAnimationFrame(() => {
@@ -1016,7 +1025,7 @@ export class TerminalHost {
   // Render — Overlay Layers (cursor + selection, drawn directly by host)
   // =========================================================================
   private scheduleOverlayDraw() {
-    if (this.disposed) return;
+    if (this.disposed || this.rustRenderMode) return;
     if (!this.overlayDrawQueued) {
       this.overlayDrawQueued = true;
       requestAnimationFrame(() => {

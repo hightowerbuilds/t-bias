@@ -2,16 +2,16 @@
 
 A terminal emulator for people who live in the command line. t-bias gives you a fast, native shell with tabs, split panes, and built-in tools — a file explorer that flips out from any terminal pane, a prompt stacker for saving and queuing reusable commands, and a code editor. Your workspace layout persists across sessions so you pick up right where you left off.
 
-Built with Tauri and Rust on the backend, SolidJS on the frontend, and a fully custom terminal renderer — no xterm.js. The VT parser, screen model, glyph atlas, and canvas rendering pipeline are all built from scratch.
+Built with Tauri and Rust on the backend, SolidJS on the frontend, and a custom canvas renderer. VT escape sequence processing uses the `vte` crate (the same parser that powers Alacritty) running natively in Rust, with the screen buffer, scrollback, and frame composition handled on the backend thread. The frontend receives fully resolved screen frames and renders them through a custom glyph atlas and Canvas2D pipeline — no xterm.js, no DOM-based terminal.
 
 ## Features
 
 **Terminal**
-- Real PTY-backed shell with full VT500 escape sequence support
+- Real PTY-backed shell with Rust-native VT processing (via `vte` crate)
 - Canvas rendering with a glyph atlas (dirty-row tracking, sub-row invalidation)
+- Synchronized output (DEC 2026) for tear-free TUI rendering
 - Truecolor, 256-color, alternate screen, mouse tracking (SGR), bracketed paste
-- Grapheme cluster segmentation (emoji, CJK, combining characters) via Intl.Segmenter
-- Reflow on resize — soft-wrapped lines merge/split correctly
+- Grapheme cluster segmentation (emoji, CJK, combining characters)
 - Scrollback with search (Cmd+F, regex, case toggle)
 - OSC 8 hyperlinks + auto-detected URL hover/click
 - OSC 52 clipboard read/write

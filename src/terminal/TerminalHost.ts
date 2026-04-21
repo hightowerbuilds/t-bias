@@ -5,6 +5,7 @@ import type { IRenderer, SelectionBounds } from "./IRenderer";
 import type { TerminalOptions, Theme } from "./types";
 import { DEFAULT_THEME } from "./types";
 import { CanvasRenderer } from "./Renderer";
+import { ScrollPageCache } from "./ScrollPageCache";
 
 // ---------------------------------------------------------------------------
 // TerminalHost — DOM-aware orchestrator
@@ -16,6 +17,7 @@ import { CanvasRenderer } from "./Renderer";
 export class TerminalHost {
   readonly core: TerminalCore;
   private renderer: IRenderer;
+  private scrollCache: ScrollPageCache;
 
   // Canvas layers
   private textCanvas: HTMLCanvasElement;           // Layer 0: text + backgrounds
@@ -56,6 +58,7 @@ export class TerminalHost {
   private textDrawQueued = false;
   private overlayDrawQueued = false;
   private syncMode = false;
+  private lastScrollbackLen = 0;
   private writesSinceLastFrame = 0;
   private bytesSinceLastFrame = 0;
   private static readonly HIGH_THROUGHPUT_BYTES = 65536; // 64KB threshold
@@ -154,6 +157,12 @@ export class TerminalHost {
     this.core.onTitleChange = (title) => this.onTitleChange?.(title);
     this.core.onCwdChange = (cwd) => this.onCwdChange?.(cwd);
     this.core.onSyncModeChange = (enabled) => this.handleSyncMode(enabled);
+
+    this.scrollCache = new ScrollPageCache();
+    if (this.renderer instanceof CanvasRenderer) {
+      const cr = this.renderer as CanvasRenderer;
+      this.scrollCache.updateMetrics(cr.cellWidth, cr.cellHeight, this.cols, this.dpr);
+    }
 
     this.renderer.resize(this.cols, this.rows);
 
@@ -261,6 +270,14 @@ export class TerminalHost {
 
   get cellHeight(): number {
     return this.renderer.cellHeight;
+  }
+
+  /** Render a ScreenFrame from the Rust VT backend directly to the canvas. */
+  drawFrame(frame: import("../ipc/types").ScreenFrame) {
+    if (this.disposed) return;
+    if (this.renderer instanceof CanvasRenderer) {
+      (this.renderer as CanvasRenderer).drawFrame(frame);
+    }
   }
 
   write(data: string) {
@@ -900,6 +917,74 @@ export class TerminalHost {
   // =========================================================================
   // Render — Text Layer (via IRenderer)
   // =========================================================================
+
+  /** Render a scrolled viewport using the page cache for scrollback rows
+   *  and live rendering for active screen rows visible at the bottom. */
+  private drawWithScrollCache(state: import("./IRenderer").RenderState) {
+    const renderer = this.renderer as CanvasRenderer;
+    const vc = this.core.virtualCanvas;
+    const sbLen = vc.scrollbackLength;
+    const vpOff = state.viewportOffset;
+
+    // Update cache metrics (no-op if unchanged)
+    this.scrollCache.updateMetrics(
+      renderer.cellWidth, renderer.cellHeight, state.cols, this.dpr,
+    );
+
+    // Invalidate cache if scrollback content changed (new rows pushed old ones out)
+    if (sbLen !== this.lastScrollbackLen) {
+      this.scrollCache.invalidate();
+      this.lastScrollbackLen = sbLen;
+    }
+
+    // How many scrollback rows are visible in the viewport?
+    const sbRowsVisible = Math.min(vpOff, Math.min(sbLen, state.rows));
+    const activeRowsVisible = state.rows - sbRowsVisible;
+
+    // The first scrollback row visible at the top of the viewport
+    const firstSbRow = sbLen - vpOff;
+
+    // Lazily render scrollback rows into the page cache
+    const getScrollbackSource = (scrollRow: number): import("./IRenderer").RowSource => {
+      const offset = vc.scrollbackRowOffset(scrollRow);
+      return {
+        chars: vc.scrollbackChars,
+        fg: vc.scrollbackFg,
+        bg: vc.scrollbackBg,
+        attrs: vc.scrollbackAttrs,
+        ulColor: null,
+        offset,
+        getGrapheme: null,
+      };
+    };
+
+    for (let i = 0; i < sbRowsVisible; i++) {
+      this.scrollCache.ensureRow(
+        firstSbRow + i, getScrollbackSource, state.cols, renderer,
+      );
+    }
+
+    // Clear the canvas and composite scrollback pages
+    const ctx = this.textCanvas.getContext("2d", { alpha: false })!;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = this.theme.background;
+    ctx.fillRect(0, 0, state.cols * renderer.cellWidth, state.rows * renderer.cellHeight);
+
+    this.scrollCache.compositeRows(ctx, firstSbRow, sbRowsVisible, 0);
+
+    // Draw active screen rows at the bottom of the viewport
+    if (activeRowsVisible > 0) {
+      const startActiveRow = vpOff - Math.min(vpOff, sbLen);
+      for (let i = 0; i < activeRowsVisible; i++) {
+        const screenRow = startActiveRow + i;
+        const src = state.getRowSource(sbRowsVisible + i);
+        const y = (sbRowsVisible + i) * renderer.cellHeight;
+        renderer.drawRowToContext(
+          ctx, src, 0, state.cols, y, renderer.cellWidth, renderer.cellHeight,
+        );
+      }
+    }
+  }
 
   private scheduleTextDraw() {
     if (this.disposed) return;

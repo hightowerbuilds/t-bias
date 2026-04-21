@@ -272,9 +272,6 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
         <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "12px", "margin-bottom": "12px" }}>
           <div>
             <div style={{ "font-size": isModal() ? "24px" : "13px", color: "var(--text-primary)", "font-weight": "500" }}>Prompt Stacker</div>
-            <div style={{ "font-size": isModal() ? "13px" : "11px", color: "var(--text-sublabel)", "margin-top": "6px", "line-height": "1.6" }}>
-              Capture reusable prompts, keep them organized, and return to the shell when you are done.
-            </div>
           </div>
           <div style={{ display: "flex", "align-items": "center", gap: "16px", "flex-shrink": "0" }}>
             <div style={{ display: "flex", "align-items": "center", gap: "10px", "font-size": "12px", color: "var(--text-dim)" }}>

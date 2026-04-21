@@ -3,12 +3,14 @@ import { TerminalHost } from "./terminal/TerminalHost";
 import {
   SPAWN_SHELL_CMD, WRITE_TO_PTY_CMD, RESIZE_PTY_CMD,
   GET_PANE_FOREGROUND_PROCESS_NAME_CMD,
+  GET_FRAME_CMD,
   RESOLVE_EXISTING_DIR_CMD,
   CREATE_SHELL_RECORD_CMD,
   ATTACH_SHELL_RECORD_CMD,
   type ShellRecord,
   type ResolvedDirectory,
   type AppConfig,
+  type ScreenFrame,
 } from "./ipc/types";
 
 const { invoke } = (window as any).__TAURI__.core;
@@ -150,6 +152,29 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       props.onExit?.();
     });
 
+    // Rust frame rendering — when the Rust VT backend signals a new frame,
+    // fetch it via IPC and render it directly to canvas, bypassing the JS
+    // VT pipeline. This is the fast path for TUI apps.
+    let rustFrameQueued = false;
+    const unlistenFrame = await listen(`frame-ready-${props.paneId}`, () => {
+      if (rustFrameQueued) return;
+      rustFrameQueued = true;
+      requestAnimationFrame(async () => {
+        rustFrameQueued = false;
+        try {
+          const frame = (await invoke(GET_FRAME_CMD, { paneId: props.paneId })) as ScreenFrame | null;
+          if (frame && terminal) {
+            terminal.drawFrame(frame);
+            if (frame.title) {
+              props.onTitleChange?.(frame.title);
+            }
+          }
+        } catch {
+          // Frame fetch failed — JS pipeline handles rendering
+        }
+      });
+    });
+
     // Only spawn a shell if this is a fresh host (not a reattach).
     if (!cached) {
       const shell = config.shell || undefined;
@@ -226,6 +251,7 @@ const TerminalView: Component<TerminalViewProps> = (props) => {
       ro.disconnect();
       unlistenOutput();
       unlistenExit();
+      unlistenFrame();
       if (processTitlePoll !== undefined) window.clearInterval(processTitlePoll);
       // Detach (not dispose) — the host stays in hostCache so it can be
       // reattached if this pane remounts after a tree restructure.

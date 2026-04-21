@@ -5,6 +5,7 @@ mod fs_ops;
 mod persistence;
 mod pty;
 mod prompt_stacker;
+mod screen;
 mod session;
 mod shell_registry;
 
@@ -30,6 +31,7 @@ pub fn run() {
             fs_ops::resolve_existing_dir,
             pty::get_pane_cwd,
             pty::get_pane_foreground_process_name,
+            pty::get_frame,
             prompt_stacker::get_prompt_stacker_state,
             prompt_stacker::save_prompt,
             prompt_stacker::edit_prompt,

@@ -435,6 +435,173 @@ export class CanvasRenderer implements IRenderer {
     return `rgb(${rgbR(color)},${rgbG(color)},${rgbB(color)})`;
   }
 
+  /** Draw a single row onto an arbitrary 2D context (used by ScrollPageCache). */
+  drawRowToContext(
+    ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+    src: import("./IRenderer").RowSource,
+    colStart: number, colEnd: number,
+    y: number,
+    cellWidth: number, cellHeight: number,
+  ) {
+    // Save our main ctx, temporarily swap to the target ctx for drawing
+    const mainCtx = this.ctx;
+    this.ctx = ctx as CanvasRenderingContext2D;
+
+    // Clear row background
+    ctx.fillStyle = this.theme.background;
+    (ctx as CanvasRenderingContext2D).fillRect(
+      colStart * cellWidth, y, (colEnd - colStart) * cellWidth, cellHeight,
+    );
+
+    this.drawRowBackgrounds(src, colStart, colEnd, y, colEnd);
+    this.drawRowGlyphs(src, colStart, colEnd, y);
+    this.drawRowDecorations(src, colStart, colEnd, y);
+
+    // Restore main ctx
+    this.ctx = mainCtx;
+  }
+
+  // =========================================================================
+  // Frame rendering — draws a ScreenFrame from the Rust VT backend
+  // =========================================================================
+
+  /** Render a complete ScreenFrame (from Rust) to the canvas. */
+  drawFrame(frame: import("../ipc/types").ScreenFrame) {
+    const t0 = performance.now();
+    const { cellWidth, cellHeight, ctx, theme } = this;
+    const { cols, rows, cells } = frame;
+
+    // Full clear
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, 0, cols * cellWidth, rows * cellHeight);
+
+    // Draw each cell
+    for (let row = 0; row < rows; row++) {
+      const y = row * cellHeight;
+
+      // Pass 1: backgrounds with run merging
+      let runStart = 0;
+      let runBg = theme.background;
+
+      for (let col = 0; col <= cols; col++) {
+        let bg: string;
+        if (col < cols) {
+          const cell = cells[row * cols + col];
+          bg = cell.attrs.inverse
+            ? this.resolveFrameColor(cell.fg, theme.foreground)
+            : this.resolveFrameColor(cell.bg, theme.background);
+        } else {
+          bg = "";
+        }
+        if (bg !== runBg) {
+          if (runBg !== theme.background && col > runStart) {
+            ctx.fillStyle = runBg;
+            ctx.fillRect(runStart * cellWidth, y, (col - runStart) * cellWidth, cellHeight);
+          }
+          runStart = col;
+          runBg = bg;
+        }
+      }
+
+      // Pass 2: glyphs
+      for (let col = 0; col < cols; col++) {
+        const cell = cells[row * cols + col];
+        if (!cell.char || cell.attrs.hidden) continue;
+
+        const wide = cell.attrs.wide;
+        let fg = this.resolveFrameColor(cell.fg, theme.foreground);
+        let bg = this.resolveFrameColor(cell.bg, theme.background);
+        if (cell.attrs.inverse) [fg, bg] = [bg, fg];
+
+        const { entry, source } = this.atlas.getTracked(
+          cell.char, cell.attrs.bold, cell.attrs.italic, cell.attrs.faint, fg, wide,
+        );
+
+        const dx = col * cellWidth;
+        const dw = wide ? cellWidth * 2 : cellWidth;
+
+        ctx.drawImage(
+          source,
+          entry.x, entry.y, entry.w, entry.h,
+          dx, y, dw, cellHeight,
+        );
+
+        if (wide) col++;
+      }
+
+      // Pass 3: decorations
+      for (let col = 0; col < cols; col++) {
+        const cell = cells[row * cols + col];
+        const x = col * cellWidth;
+        const wide = cell.attrs.wide;
+        const w = wide ? cellWidth * 2 : cellWidth;
+
+        let fg = this.resolveFrameColor(cell.fg, theme.foreground);
+        if (cell.attrs.inverse) {
+          fg = this.resolveFrameColor(cell.bg, theme.background);
+        }
+
+        // Underline
+        if (cell.attrs.underline > 0) {
+          ctx.strokeStyle = fg;
+          ctx.lineWidth = 1;
+          const ulY = y + cellHeight - 1;
+          if (cell.attrs.underline === 3) {
+            this.drawCurly(ctx, x, ulY, w);
+          } else if (cell.attrs.underline === 2) {
+            ctx.beginPath();
+            ctx.moveTo(x, ulY - 2); ctx.lineTo(x + w, ulY - 2);
+            ctx.moveTo(x, ulY); ctx.lineTo(x + w, ulY);
+            ctx.stroke();
+          } else {
+            if (cell.attrs.underline === 4) ctx.setLineDash([2, 2]);
+            else if (cell.attrs.underline === 5) ctx.setLineDash([4, 2]);
+            ctx.beginPath();
+            ctx.moveTo(x, ulY); ctx.lineTo(x + w, ulY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+
+        if (cell.attrs.strikethrough) {
+          ctx.strokeStyle = fg;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, y + cellHeight / 2);
+          ctx.lineTo(x + w, y + cellHeight / 2);
+          ctx.stroke();
+        }
+
+        if (cell.attrs.overline) {
+          ctx.strokeStyle = fg;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, y); ctx.lineTo(x + w, y);
+          ctx.stroke();
+        }
+
+        if (wide) col++;
+      }
+    }
+
+    this._lastDrawTime = performance.now() - t0;
+    this._lastDirtyRows = rows;
+  }
+
+  /** Resolve a Rust FrameColor to a CSS color string. */
+  private resolveFrameColor(color: import("../ipc/types").FrameColor, fallback: string): string {
+    switch (color.type) {
+      case "Default": return fallback;
+      case "Palette": {
+        const idx = color.index;
+        if (idx < 16 && idx < this.theme.ansi.length) return this.theme.ansi[idx];
+        const [r, g, b] = palette256(idx);
+        return `rgb(${r},${g},${b})`;
+      }
+      case "Rgb": return `rgb(${color.r},${color.g},${color.b})`;
+    }
+  }
+
   private drawCurly(ctx: CanvasRenderingContext2D, x: number, y: number, w: number) {
     ctx.beginPath();
     for (let i = 0; i <= w; i++) {

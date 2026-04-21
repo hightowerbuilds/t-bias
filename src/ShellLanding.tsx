@@ -14,25 +14,16 @@ export const ShellLanding: Component<{
 }> = (props) => {
   return (
     <div
-      class="modal-backdrop"
-      style={{ background: "rgba(0,0,0,0.68)", padding: "24px", "z-index": "var(--z-shell-landing)" }}
-      onClick={() => { if (props.hasTabs) props.onClose(); }}
+      style={{
+        flex: "1",
+        display: "flex",
+        "flex-direction": "column",
+        gap: "18px",
+        padding: "26px",
+        "min-height": "0",
+        overflow: "hidden",
+      }}
     >
-      <div
-        class="modal-card"
-        style={{
-          width: "min(900px, calc(100vw - 48px))",
-          height: "min(780px, calc(100vh - 48px))",
-          padding: "26px",
-          "border-radius": "var(--radius-xl)",
-          "box-shadow": "var(--shadow-landing)",
-          display: "flex",
-          "flex-direction": "column",
-          gap: "18px",
-          "min-height": "0",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
         <div style={{ display: "flex", "justify-content": "space-between", gap: "18px", "align-items": "flex-start" }}>
           <div>
             <div style={{ "font-size": "14px", color: "var(--text-muted)" }}>t-bias</div>
@@ -47,14 +38,9 @@ export const ShellLanding: Component<{
                 Restore Last Session
               </button>
             </Show>
-            <button class="btn btn-secondary" style={{ padding: "9px 14px" }} onClick={props.onNewShell}>
-              New Shell
+            <button class="btn btn-secondary" style={{ padding: "9px 14px" }} onClick={props.onClose}>
+              Close
             </button>
-            <Show when={props.hasTabs}>
-              <button class="btn btn-ghost" style={{ padding: "9px 14px" }} onClick={props.onClose}>
-                Done
-              </button>
-            </Show>
           </div>
         </div>
 
@@ -149,7 +135,6 @@ export const ShellLanding: Component<{
             </div>
           </Show>
         </div>
-      </div>
     </div>
   );
 };

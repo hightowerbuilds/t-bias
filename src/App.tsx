@@ -759,16 +759,28 @@ const App: Component = () => {
         </Show>
 
         <Show when={shellLandingOpen()}>
-          <ShellLanding
-            records={registry.shellRecords()}
-            hasTabs={tabs.length > 0}
-            findOpenShell={findOpenShell}
-            onOpenRecord={openShellRecord}
-            onTogglePersist={(id, persist) => void registry.setShellPersistOnQuit(id, persist)}
-            onRestoreAll={restorePersistedShells}
-            onNewShell={startNewShellWorkspace}
-            onClose={() => setShellLandingOpen(false)}
-          />
+          <div
+            style={{
+              position: "fixed",
+              inset: "0",
+              background: "var(--bg-overlay)",
+              display: "flex",
+              "flex-direction": "column",
+              "z-index": "var(--z-shell-landing)",
+              "min-height": "0",
+            }}
+          >
+            <ShellLanding
+              records={registry.shellRecords()}
+              hasTabs={tabs.length > 0}
+              findOpenShell={findOpenShell}
+              onOpenRecord={openShellRecord}
+              onTogglePersist={(id, persist) => void registry.setShellPersistOnQuit(id, persist)}
+              onRestoreAll={restorePersistedShells}
+              onNewShell={startNewShellWorkspace}
+              onClose={() => setShellLandingOpen(false)}
+            />
+          </div>
         </Show>
 
         <CloseConfirmDialog

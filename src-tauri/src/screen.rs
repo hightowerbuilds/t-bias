@@ -561,7 +561,10 @@ impl Perform for ScreenBuffer {
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
+        // Collect params — preserve sub-parameter grouping for SGR handling.
         let ps: Vec<u16> = params.iter().flat_map(|sub| sub.iter().map(|&v| v)).collect();
+        // Also keep raw param groups for SGR sub-parameter support (e.g. CSI 4:3 m)
+        let raw_groups: Vec<Vec<u16>> = params.iter().map(|sub| sub.to_vec()).collect();
         let p0 = ps.first().copied().unwrap_or(0);
         let p1 = ps.get(1).copied().unwrap_or(0);
         let is_private = intermediates.first() == Some(&b'?');
@@ -725,16 +728,19 @@ impl Perform for ScreenBuffer {
             }
 
             // SGR — Select Graphic Rendition
+            // Uses raw_groups to handle colon sub-parameters (e.g. CSI 4:3 m
+            // for curly underline, CSI 38:2:R:G:B m for RGB color).
             'm' => {
-                if ps.is_empty() || (ps.len() == 1 && ps[0] == 0) {
+                if raw_groups.is_empty() || (raw_groups.len() == 1 && raw_groups[0].first() == Some(&0)) {
                     self.pen_fg = Color::Default;
                     self.pen_bg = Color::Default;
                     self.pen_attrs = CellAttrs::default();
                     return;
                 }
-                let mut i = 0;
-                while i < ps.len() {
-                    match ps[i] {
+                for group in &raw_groups {
+                    if group.is_empty() { continue; }
+                    let code = group[0];
+                    match code {
                         0 => {
                             self.pen_fg = Color::Default;
                             self.pen_bg = Color::Default;
@@ -743,7 +749,12 @@ impl Perform for ScreenBuffer {
                         1 => self.pen_attrs.bold = true,
                         2 => self.pen_attrs.faint = true,
                         3 => self.pen_attrs.italic = true,
-                        4 => self.pen_attrs.underline = 1,
+                        4 => {
+                            // SGR 4 with optional sub-parameter: 4:0=none, 4:1=single,
+                            // 4:2=double, 4:3=curly, 4:4=dotted, 4:5=dashed
+                            let style = group.get(1).copied().unwrap_or(1);
+                            self.pen_attrs.underline = style.min(5) as u8;
+                        }
                         7 => self.pen_attrs.inverse = true,
                         8 => self.pen_attrs.hidden = true,
                         9 => self.pen_attrs.strikethrough = true,
@@ -753,41 +764,38 @@ impl Perform for ScreenBuffer {
                         27 => self.pen_attrs.inverse = false,
                         28 => self.pen_attrs.hidden = false,
                         29 => self.pen_attrs.strikethrough = false,
-                        30..=37 => self.pen_fg = Color::Palette { index: (ps[i] - 30) as u8 },
+                        30..=37 => self.pen_fg = Color::Palette { index: (code - 30) as u8 },
                         38 => {
-                            if i + 1 < ps.len() && ps[i + 1] == 5 && i + 2 < ps.len() {
-                                self.pen_fg = Color::Palette { index: ps[i + 2] as u8 };
-                                i += 2;
-                            } else if i + 1 < ps.len() && ps[i + 1] == 2 && i + 4 < ps.len() {
+                            // Foreground color: 38:5:N (palette) or 38:2:R:G:B (RGB)
+                            // Also handles semicolon form: 38;5;N or 38;2;R;G;B
+                            if group.len() >= 3 && group[1] == 5 {
+                                self.pen_fg = Color::Palette { index: group[2] as u8 };
+                            } else if group.len() >= 5 && group[1] == 2 {
                                 self.pen_fg = Color::Rgb {
-                                    r: ps[i + 2] as u8,
-                                    g: ps[i + 3] as u8,
-                                    b: ps[i + 4] as u8,
+                                    r: group[2] as u8,
+                                    g: group[3] as u8,
+                                    b: group[4] as u8,
                                 };
-                                i += 4;
                             }
                         }
                         39 => self.pen_fg = Color::Default,
-                        40..=47 => self.pen_bg = Color::Palette { index: (ps[i] - 40) as u8 },
+                        40..=47 => self.pen_bg = Color::Palette { index: (code - 40) as u8 },
                         48 => {
-                            if i + 1 < ps.len() && ps[i + 1] == 5 && i + 2 < ps.len() {
-                                self.pen_bg = Color::Palette { index: ps[i + 2] as u8 };
-                                i += 2;
-                            } else if i + 1 < ps.len() && ps[i + 1] == 2 && i + 4 < ps.len() {
+                            if group.len() >= 3 && group[1] == 5 {
+                                self.pen_bg = Color::Palette { index: group[2] as u8 };
+                            } else if group.len() >= 5 && group[1] == 2 {
                                 self.pen_bg = Color::Rgb {
-                                    r: ps[i + 2] as u8,
-                                    g: ps[i + 3] as u8,
-                                    b: ps[i + 4] as u8,
+                                    r: group[2] as u8,
+                                    g: group[3] as u8,
+                                    b: group[4] as u8,
                                 };
-                                i += 4;
                             }
                         }
                         49 => self.pen_bg = Color::Default,
-                        90..=97 => self.pen_fg = Color::Palette { index: (ps[i] - 90 + 8) as u8 },
-                        100..=107 => self.pen_bg = Color::Palette { index: (ps[i] - 100 + 8) as u8 },
+                        90..=97 => self.pen_fg = Color::Palette { index: (code - 90 + 8) as u8 },
+                        100..=107 => self.pen_bg = Color::Palette { index: (code - 100 + 8) as u8 },
                         _ => {}
                     }
-                    i += 1;
                 }
             }
 

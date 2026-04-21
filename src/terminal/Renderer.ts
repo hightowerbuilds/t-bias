@@ -476,8 +476,10 @@ export class CanvasRenderer implements IRenderer {
     ctx.fillRect(0, 0, cols * cellWidth, rows * cellHeight);
 
     // Draw each cell
+    // Use Math.round for row Y positions to avoid subpixel gaps between rows.
     for (let row = 0; row < rows; row++) {
-      const y = row * cellHeight;
+      const y = Math.round(row * cellHeight);
+      const rowH = Math.round((row + 1) * cellHeight) - y; // pixel-perfect height
 
       // Pass 1: backgrounds with run merging
       let runStart = 0;
@@ -496,7 +498,7 @@ export class CanvasRenderer implements IRenderer {
         if (bg !== runBg) {
           if (runBg !== theme.background && col > runStart) {
             ctx.fillStyle = runBg;
-            ctx.fillRect(runStart * cellWidth, y, (col - runStart) * cellWidth, cellHeight);
+            ctx.fillRect(runStart * cellWidth, y, (col - runStart) * cellWidth, rowH);
           }
           runStart = col;
           runBg = bg;
@@ -523,7 +525,7 @@ export class CanvasRenderer implements IRenderer {
         ctx.drawImage(
           source,
           entry.x, entry.y, entry.w, entry.h,
-          dx, y, dw, cellHeight,
+          dx, y, dw, rowH,
         );
 
         if (wide) col++;
@@ -545,7 +547,7 @@ export class CanvasRenderer implements IRenderer {
         if (cell.attrs.underline > 0) {
           ctx.strokeStyle = fg;
           ctx.lineWidth = 1;
-          const ulY = y + cellHeight - 1;
+          const ulY = y + rowH - 1;
           if (cell.attrs.underline === 3) {
             this.drawCurly(ctx, x, ulY, w);
           } else if (cell.attrs.underline === 2) {
@@ -567,8 +569,8 @@ export class CanvasRenderer implements IRenderer {
           ctx.strokeStyle = fg;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(x, y + cellHeight / 2);
-          ctx.lineTo(x + w, y + cellHeight / 2);
+          ctx.moveTo(x, y + rowH / 2);
+          ctx.lineTo(x + w, y + rowH / 2);
           ctx.stroke();
         }
 

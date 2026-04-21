@@ -57,7 +57,7 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
     padding: "2px 6px",
     "font-size": "11px",
     "font-family": "inherit",
-    "border-radius": "4px",
+    "border-radius": "0",
   };
 
   return (
@@ -65,7 +65,7 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
       background: "var(--bg-surface)",
       border: queued() ? "1px solid var(--queued-border)" : "1px solid var(--border)",
       "border-left": queued() ? "3px solid var(--queued-text)" : "1px solid var(--border)",
-      "border-radius": "10px",
+      "border-radius": "0",
       padding: "16px",
       "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.02)",
       transition: "border-color 0.15s ease",
@@ -122,7 +122,7 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
                       background: "var(--bg-elevated)",
                       color: "var(--text-dim)",
                       padding: "2px 8px",
-                      "border-radius": "var(--radius-pill)",
+                      "border-radius": "0",
                       "font-size": "10px",
                     }}>
                       {tag}
@@ -147,7 +147,7 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
             height: "100px",
             resize: "vertical",
             color: cardProps.config.theme.foreground,
-            "border-radius": "var(--radius-md)",
+            "border-radius": "0",
             padding: "10px",
             "box-sizing": "border-box",
             "font-size": "13px",
@@ -169,7 +169,7 @@ const PromptCard: Component<PromptCardProps> = (cardProps) => {
             height: "28px",
             padding: "0 10px",
             "font-size": "11px",
-            "border-radius": "var(--radius-md)",
+            "border-radius": "0",
             color: cardProps.config.theme.foreground,
             "margin-bottom": "8px",
             "box-sizing": "border-box",
@@ -315,7 +315,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
         <div style={{
           background: "var(--bg-deep)",
           border: "1px solid var(--border-subtle)",
-          "border-radius": "var(--radius-lg)",
+          "border-radius": "0",
           padding: "20px",
           display: "flex",
           "flex-direction": "column",
@@ -343,7 +343,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
               height: isModal() ? "160px" : "130px",
               resize: "none",
               color: props.config.theme.foreground,
-              "border-radius": "var(--radius-md)",
+              "border-radius": "0",
               padding: "14px",
               "box-sizing": "border-box",
               "font-size": "13px",
@@ -379,7 +379,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
           flex: "1",
           background: "var(--bg-deep)",
           border: "1px solid var(--border-subtle)",
-          "border-radius": "var(--radius-lg)",
+          "border-radius": "0",
           padding: "20px",
           display: "flex",
           "flex-direction": "column",
@@ -402,7 +402,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
                   height: "28px",
                   padding: "0 10px",
                   "font-size": "12px",
-                  "border-radius": "var(--radius-md)",
+                  "border-radius": "0",
                   color: props.config.theme.foreground,
                 }}
               />
@@ -415,7 +415,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
                     background: !store.tagFilter() ? "var(--accent)" : "var(--bg-elevated)",
                     color: !store.tagFilter() ? "#fff" : "var(--text-dim)",
                     border: "none",
-                    "border-radius": "var(--radius-pill)",
+                    "border-radius": "0",
                     padding: "2px 10px",
                     "font-size": "10px",
                     cursor: "pointer",
@@ -432,7 +432,7 @@ const PromptStackerView: Component<PromptStackerViewProps> = (props) => {
                         background: store.tagFilter() === tag ? "var(--accent)" : "var(--bg-elevated)",
                         color: store.tagFilter() === tag ? "#fff" : "var(--text-dim)",
                         border: "none",
-                        "border-radius": "var(--radius-pill)",
+                        "border-radius": "0",
                         padding: "2px 10px",
                         "font-size": "10px",
                         cursor: "pointer",

@@ -1,21 +1,10 @@
 import { defineConfig } from "vite";
-import solidPlugin from "vite-plugin-solid";
+import solid from "vite-plugin-solid";
 
+// SolidJS SPA. Deno's main.ts serves the built `dist/` (and the /api + /ws
+// backend bridge) in production; in browser dev you can also run `bun run dev`.
 export default defineConfig({
-  plugins: [solidPlugin()],
-  clearScreen: false,
-  server: {
-    port: 1420,
-    strictPort: true,
-  },
-  envPrefix: ["VITE_", "TAURI_"],
-  build: {
-    outDir: "dist",
-    target: "esnext",
-    minify: "esbuild",
-  },
-  test: {
-    environment: "node",
-    include: ["src/**/__tests__/**/*.test.ts"],
-  },
+  plugins: [solid()],
+  build: { outDir: "dist", target: "esnext", emptyOutDir: true },
+  server: { port: 5173 },
 });

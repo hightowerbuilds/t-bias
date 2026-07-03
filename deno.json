@@ -1,0 +1,23 @@
+{
+  "desktop": {
+    "app": {
+      "name": "t-bias",
+      "identifier": "com.tbias.app"
+    },
+    "backend": "webview",
+    "output": {
+      "macos": "./dist-app/t-bias.app"
+    }
+  },
+  "tasks": {
+    "serve": "deno run -A --watch main.ts",
+    "desktop": "deno desktop main.ts",
+    "desktop:hmr": "deno desktop --hmr main.ts"
+  },
+  "fmt": {
+    "exclude": ["dist/", "dist-app/", "node_modules/"]
+  },
+  "lint": {
+    "exclude": ["dist/", "dist-app/", "node_modules/", "src/"]
+  }
+}

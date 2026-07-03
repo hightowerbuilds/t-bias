@@ -1,6 +1,16 @@
 import { render } from "solid-js/web";
-import "./styles/theme.css";
-import "./styles/components.css";
-import App from "./App";
+import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
+import { RouterProvider } from "@tanstack/solid-router";
+import { router } from "./router";
+import "./styles.css";
 
-render(() => <App />, document.getElementById("root")!);
+const queryClient = new QueryClient();
+
+render(
+  () => (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  ),
+  document.getElementById("root")!,
+);

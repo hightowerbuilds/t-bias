@@ -10,8 +10,13 @@
 //
 // The BrowserWindow block is guarded so the same file works in both contexts.
 
+import { PtyBridge } from "./pty_bridge.ts";
+
 const DIST = new URL("./dist/", import.meta.url);
 const PORT = Number(Deno.env.get("PORT") ?? "4321");
+
+// Rust PTY sidecar supervisor. Started on first use.
+const bridge = new PtyBridge();
 
 const CONTENT_TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -69,6 +74,23 @@ function handler(req: Request): Response | Promise<Response> {
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.onopen = () => socket.send("ws bridge open ✓");
     socket.onmessage = (e) => socket.send(`echo: ${e.data}`);
+    return response;
+  }
+
+  // PTY channel: one WebSocket per terminal pane, bridged to the Rust sidecar.
+  if (url.pathname === "/pty") {
+    if (req.headers.get("upgrade") !== "websocket") {
+      return new Response("expected websocket", { status: 426 });
+    }
+    const paneId = Number(url.searchParams.get("pane") ?? "1");
+    const cols = Number(url.searchParams.get("cols") ?? "80");
+    const rows = Number(url.searchParams.get("rows") ?? "24");
+    const cwd = url.searchParams.get("cwd") ?? undefined;
+    const { socket, response } = Deno.upgradeWebSocket(req);
+    socket.onopen = async () => {
+      await bridge.start();
+      bridge.attach(paneId, socket, { cols, rows, cwd });
+    };
     return response;
   }
 

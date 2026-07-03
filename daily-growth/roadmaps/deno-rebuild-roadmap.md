@@ -84,13 +84,14 @@ De-risk the unproven path (PTY ↔ Deno ↔ webview streaming) **first**.
 
 **Dev workflow established:** develop as a normal web app — `deno task serve` (or `PORT=4321 deno run -A --watch main.ts`) serves `dist/` + the bridge; iterate in a browser. `bun run build` rebuilds the SPA. `deno task desktop` bundles the native `.app`. main.ts degrades gracefully between browser and native (guarded BrowserWindow).
 
-### Phase 1 — PTY spine ⭐ (the make-or-break vertical slice)
-- [ ] Extract `pty.rs` PTY logic into a standalone Rust sidecar crate
-- [ ] Sidecar framed protocol over unix socket: `spawn`, `write`, `resize`, `close` ↑; `output`, `exit` ↓
-- [ ] Deno entrypoint spawns + supervises the sidecar; guaranteed teardown on exit
-- [ ] `Deno.serve()` WebSocket streaming PTY output → xterm.js
-- [ ] **One xterm pane running a real login shell**, bidirectional, with resize
-- [ ] Validate: `vim`, `htop`, `claude`, heavy output (`yes`) all behave
+### Phase 1 — PTY spine ⭐ (the make-or-break vertical slice) — spine PROVEN
+- [x] Extract `pty.rs` PTY logic into a standalone Rust sidecar crate (`sidecar/`, `tbias-pty` bin, portable-pty + libc + base64 + serde_json)
+- [x] Sidecar framed protocol — **NDJSON over stdio** (not unix socket): `spawn`/`input`/`resize`/`close` ↑; `ready`/`output`/`exit`/`error` ↓, PTY bytes base64'd. Binary framing deferred as an optimization.
+- [x] Deno spawns + supervises the sidecar (`pty_bridge.ts`); teardown on exit (stdin EOF → `close_all`; `unload` → SIGTERM). Reuses the SIGHUP→CONT→TERM→KILL process-group logic.
+- [x] `Deno.serve()` WebSocket (`/pty?pane=N&cols&rows`) streaming PTY output → xterm.js (binary frames out, JSON `{t:"i"|"r"}` in)
+- [x] **One xterm pane running a real login shell** — `XtermHost.ts` + `TerminalRoute.tsx`, bidirectional, ResizeObserver-driven resize. Verified headlessly end-to-end (input executes in zsh, output round-trips) + browser visual.
+- [ ] Validate real apps: `vim`, `htop`, `claude`, heavy output (`yes`) — needs manual/visual pass
+- [ ] **Package the sidecar into the native `.app`** — embed `tbias-pty` + resolve its path at runtime inside the bundle (browser dev path works today; native bundling is unsolved). Ties into Phase 5.
 
 ### Phase 2 — Panes / tabs
 - [ ] Port `pane-tree.ts` (split/terminal/editor tree, directional nav)

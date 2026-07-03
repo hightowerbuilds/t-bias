@@ -118,3 +118,30 @@ b.ok {
 b.err {
   color: var(--err);
 }
+
+/* Terminal route */
+.term-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+}
+
+.term-status {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.term-host {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0d1117;
+  padding: 6px;
+}
+
+.term-host .xterm {
+  height: 100%;
+}

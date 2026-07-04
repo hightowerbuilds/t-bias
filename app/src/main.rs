@@ -6,6 +6,7 @@
 // cell-grid `TerminalElement` (colors, attrs, cursor) lands in Phase 2.
 
 mod terminal;
+mod terminal_view;
 
 use std::time::Duration;
 
@@ -16,6 +17,10 @@ use gpui::{
 };
 
 use terminal::{Terminal, TerminalSize};
+use terminal_view::{terminal_element, Theme};
+
+const FONT_FAMILY: &str = "Menlo";
+const FONT_SIZE: f32 = 14.;
 
 /// Initial grid size until the element measures real cell dimensions (Phase 2).
 const INITIAL_SIZE: TerminalSize = TerminalSize {
@@ -76,7 +81,7 @@ impl Root {
                         .await;
                     let _ = this.update(cx, |root, _| {
                         if let Some(t) = root.terminal.as_ref() {
-                            t.input("uname -a && ls -1 | head -n 8\r");
+                            t.input("ls --color=always -1 | head -n 8\r");
                         }
                     });
                 })
@@ -101,44 +106,28 @@ fn is_exit(event: &AlacEvent) -> bool {
 
 impl Render for Root {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let mut column = div()
+        let root = div()
             .flex()
             .flex_col()
             .size_full()
             .bg(rgb(0x0d1117))
-            .text_color(rgb(0xe6edf3))
-            .text_size(px(14.))
-            .font_family("Menlo")
-            .p_3()
-            .gap(px(0.));
+            .p_2();
 
         match &self.terminal {
-            Some(term) => {
-                for line in term.visible_lines() {
-                    // A per-line div preserves row breaks; a non-breaking space
-                    // keeps empty rows from collapsing to zero height.
-                    let text = if line.is_empty() {
-                        "\u{00a0}".to_string()
-                    } else {
-                        line
-                    };
-                    column = column.child(div().child(text));
-                }
-                if term.has_exited() {
-                    column = column
-                        .child(div().text_color(rgb(0x8b949e)).child("[shell exited]"));
-                }
-            }
-            None => {
-                column = column.child(
-                    div()
-                        .text_color(rgb(0xff7b72))
-                        .child("failed to start terminal — see logs"),
-                );
-            }
+            Some(term) => root.child(
+                div().flex_1().child(terminal_element(
+                    term.handle(),
+                    FONT_FAMILY.into(),
+                    px(FONT_SIZE),
+                    Theme::default(),
+                )),
+            ),
+            None => root.text_color(rgb(0xff7b72)).child(
+                div()
+                    .font_family(FONT_FAMILY)
+                    .child("failed to start terminal — see logs"),
+            ),
         }
-
-        column
     }
 }
 

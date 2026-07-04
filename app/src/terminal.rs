@@ -144,6 +144,15 @@ impl Terminal {
         ))
     }
 
+    /// A cheap, cloneable handle the renderer uses to read the grid and push
+    /// resizes. Lives on the UI thread only (the `mpsc::Sender` is `!Sync`).
+    pub fn handle(&self) -> TerminalHandle {
+        TerminalHandle {
+            term: self.term.clone(),
+            msg_tx: self.msg_tx.clone(),
+        }
+    }
+
     /// Write raw bytes to the shell.
     pub fn input(&self, bytes: impl Into<Vec<u8>>) {
         let _ = self.msg_tx.send(Msg::Input(bytes.into()));
@@ -165,13 +174,15 @@ impl Terminal {
         self.exited = true;
     }
 
+    #[allow(dead_code)] // surfaced in the UI once pane/tab chrome lands (P4)
     pub fn has_exited(&self) -> bool {
         self.exited
     }
 
-    /// Naive per-line text snapshot of the visible grid. Phase 2 replaces this
-    /// with a real GPUI `Element` that draws cells with color/attrs; for now it
-    /// just proves the PTY -> VTE -> Term -> UI pipeline end to end.
+    /// Plain-text snapshot of the visible grid (no color/attrs). Superseded for
+    /// display by the Phase 2 cell renderer, but kept as a headless verification
+    /// aid — screen capture is unavailable in this environment.
+    #[allow(dead_code)]
     pub fn visible_lines(&self) -> Vec<String> {
         let term = self.term.lock();
         let cols = term.columns();
@@ -193,6 +204,32 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.msg_tx.send(Msg::Shutdown);
+    }
+}
+
+/// UI-thread handle for the renderer: read the shared grid, push resizes.
+#[derive(Clone)]
+pub struct TerminalHandle {
+    term: Arc<FairMutex<Term<TbiasListener>>>,
+    msg_tx: Sender<Msg>,
+}
+
+impl TerminalHandle {
+    /// The shared terminal, for reading `renderable_content()` while painting.
+    pub fn term(&self) -> &Arc<FairMutex<Term<TbiasListener>>> {
+        &self.term
+    }
+
+    /// Reflow the emulator grid and the PTY to a new cell size. No-op if the
+    /// grid already has these dimensions (so the render loop can call it freely).
+    pub fn resize_to(&self, size: TerminalSize) {
+        let mut term = self.term.lock();
+        if term.columns() == size.cols && term.screen_lines() == size.lines {
+            return;
+        }
+        term.resize(size);
+        drop(term);
+        let _ = self.msg_tx.send(Msg::Resize(size));
     }
 }
 

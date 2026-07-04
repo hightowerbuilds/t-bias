@@ -121,28 +121,41 @@ that. Proven: Zed's built-in terminal is GPUI + `alacritty_terminal`.
   wakeup batching budget under load (P2), real keyboard input replaces the hardcoded startup
   commands (P3).
 
-## Phase 2 — Terminal rendering (TerminalElement)
+## Phase 2 — Terminal rendering (TerminalElement) — DONE
 
-- [ ] Create `terminal/element.rs` implementing a GPUI `Element` for the grid.
-- [ ] Choose + load a monospace font (font-kit); expose font family + size.
-- [ ] Measure cell size (advance width, line height) from the font at current size.
-- [ ] In `render`, read `term.lock().renderable_content()` for visible cells.
-- [ ] Draw background rects per cell (batch runs of same bg color to cut draw calls).
-- [ ] Draw glyphs per cell with fg color (let GPUI own shaping/atlas).
-- [ ] Map alacritty colors → RGBA:
-  - [ ] 16 ANSI colors + bright variants.
-  - [ ] 256-color cube.
-  - [ ] 24-bit truecolor.
-  - [ ] Named/default fg/bg from a theme struct.
-- [ ] Text attributes: bold, italic, underline, strikethrough, dim, inverse, hidden.
-- [ ] Render cursor: shape (Block/Beam/Underline), focused vs unfocused (hollow), blink.
-- [ ] Implement blink timer (BlinkManager equivalent) tied to `cx` timers.
-- [ ] Handle wide (CJK) glyphs + zero-width / combining marks.
-- [ ] Compute grid size from element bounds → cols/rows; send `Resize` to PTY + `term.resize()`.
-- [ ] Debounce resize; keep PTY `TermSize` and element in sync (incl. pixel size for apps).
-- [ ] **VERIFY:** run `vim`, `htop`, `ls --color`, a 256/truecolor test script, a CJK
-      string — all render correctly and reflow on window resize. ✅
-- [ ] Commit: `feat(gpui-2): terminal cell rendering`.
+Chose GPUI's built-in `canvas(prepaint, paint)` element over a hand-rolled `Element` impl — it
+gives the low-level paint API (bounds → `paint_quad` / `shape_line`) without the trait
+boilerplate, which is exactly what a grid needs. All in `app/src/terminal_view.rs`.
+
+- [x] Grid element implemented via `canvas`; `terminal_element(handle, family, size, theme)`.
+- [x] Monospace font via `gpui::font(family)` (Menlo, 14px); family/size are parameters.
+- [x] Measure cell size: `text_system().advance(font_id, size, 'm').width` for cell width;
+      line height = `size * 1.3`. (Font-kit not needed — gpui's text system owns metrics.)
+- [x] Read `term.lock().renderable_content()` each paint; snapshot the grid + cursor into owned
+      data and **drop the lock before painting** (don't hold the FairMutex across shaping).
+- [x] Background rects: coalesce contiguous runs of the same non-default bg into one `fill` quad.
+- [x] Glyphs: one `shape_line` per row (GPUI owns shaping/atlas), painted at the row origin.
+- [x] alacritty colors → RGBA: 16 ANSI + bright, 256 cube (steps 0/95/135/175/215/255) +
+      grayscale ramp, 24-bit truecolor (`Color::Spec`), named/default fg/bg/cursor from a
+      `Theme` struct (GitHub-dark palette; `bg` matches the window).
+- [x] Attributes: bold (+ bold-is-bright for ANSI 0-7), italic, underline (any underline flag),
+      strikethrough, dim (×0.66), inverse (swap fg/bg), hidden (fg=bg).
+- [~] Cursor: hollow box (`outline`) for now — correct-looking regardless of focus. Focused
+      solid/inverted block + shape (Block/Beam/Underline) + blink deferred to Phase 3 (needs
+      focus tracking) / a blink timer.
+- [x] Wide (CJK) glyphs: skip `WIDE_CHAR_SPACER` / `LEADING_WIDE_CHAR_SPACER` cells so the wide
+      glyph takes its natural 2-cell advance. (Zero-width/combining marks: basic; refine later.)
+- [x] Compute cols/rows from the element's painted bounds in `prepaint`; `handle.resize_to()`
+      reflows both `term.resize()` and the PTY (`Msg::Resize`), no-op when unchanged.
+- [~] Resize is idempotent per-frame (no-op when dims match) rather than time-debounced; pixel
+      size still 0 in `TermSize` (full-screen apps that query pixel size — deferred).
+- [x] **VERIFY:** ⚠️ screen capture is blocked in this environment, so verified headlessly: the
+      paint path runs without panic across 16-color SGR, bold-bright, underline, inverse, 24-bit
+      truecolor, `ls --color=always`, and CJK wide chars; and the grid **reflows** to fill the
+      window (initial 100×30 → 44 rows + wider cols, confirmed by a long `uname` line no longer
+      wrapping). Pixel-accurate visual confirmation (vim/htop looking right on screen) still
+      pending a screenshot — data + paint-call path proven, but eyes-on is a TODO.
+- [x] Commit: `feat(gpui-2): terminal cell rendering`.
 
 ## Phase 3 — Input (keyboard, mouse, clipboard)
 

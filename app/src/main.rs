@@ -9,6 +9,7 @@ mod db;
 mod explorer;
 mod fs;
 mod input;
+mod markdown;
 mod pane_tree;
 mod terminal;
 mod terminal_view;
@@ -25,8 +26,9 @@ use gpui::{
     FocusHandle, KeyDownEvent, ScrollDelta, ScrollWheelEvent, Window, WindowBounds, WindowOptions,
 };
 
-use explorer::Explorer;
+use explorer::{is_markdown, Explorer, Preview};
 use input::{encode_key, KeyMods};
+use markdown::markdown_element;
 use terminal::{Terminal, TerminalSize};
 use terminal_view::{terminal_element, Theme};
 
@@ -219,8 +221,12 @@ impl Root {
         }
     }
 
-    /// Build the read-only explorer face (header + entry list).
+    /// Build the read-only explorer face — a markdown preview if one is open,
+    /// otherwise the directory listing.
     fn render_explorer(&self, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(preview) = self.explorer.preview() {
+            return self.render_preview(preview, cx);
+        }
         let at_root = self.explorer.at_root();
         let up = div()
             .id("explorer-up")
@@ -268,6 +274,9 @@ impl Root {
                 EntryKind::Symlink => (format!("{}@", entry.name), rgb(0x39c5cf)),
                 EntryKind::File => (entry.name.clone(), rgb(0xe6edf3)),
             };
+            // Markdown files are clickable too (→ preview); mark them 📝.
+            let md = entry.kind == EntryKind::File && is_markdown(&entry.name);
+            let label = if md { format!("{label} ·md") } else { label };
             let mut row = div()
                 .id(("entry", i))
                 .px_2()
@@ -278,6 +287,12 @@ impl Root {
                 let name = entry.name.clone();
                 row = row.on_click(cx.listener(move |this, _, _, cx| {
                     this.explorer.enter(&name);
+                    cx.notify();
+                }));
+            } else if md {
+                let name = entry.name.clone();
+                row = row.on_click(cx.listener(move |this, _, _, cx| {
+                    this.explorer.open_file(&name);
                     cx.notify();
                 }));
             }
@@ -292,6 +307,58 @@ impl Root {
             .text_size(px(FONT_SIZE))
             .child(header)
             .child(list)
+            .into_any_element()
+    }
+
+    /// Build the markdown preview face (toolbar + rendered document).
+    fn render_preview(&self, preview: &Preview, cx: &mut Context<Self>) -> AnyElement {
+        let button = |id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .px_2()
+                .rounded_md()
+                .bg(rgb(0x21262d))
+                .text_color(rgb(0xc9d1d9))
+                .hover(|s| s.bg(rgb(0x30363d)))
+                .child(label)
+        };
+
+        let toolbar = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .bg(rgb(0x161b22))
+            .font_family(FONT_FAMILY)
+            .text_size(px(13.))
+            .text_color(rgb(0x8b949e))
+            .child(button("md-back", "← files").on_click(cx.listener(|this, _, _, cx| {
+                this.explorer.close_preview();
+                cx.notify();
+            })))
+            .child(div().text_color(rgb(0xe6edf3)).child(preview.name.clone()))
+            .child(div().flex_1())
+            .child(button("md-fdown", "A−").on_click(cx.listener(|this, _, _, cx| {
+                this.explorer.zoom_preview(-1.0);
+                cx.notify();
+            })))
+            .child(button("md-freset", "reset").on_click(cx.listener(|this, _, _, cx| {
+                this.explorer.reset_preview_font();
+                cx.notify();
+            })))
+            .child(button("md-fup", "A+").on_click(cx.listener(|this, _, _, cx| {
+                this.explorer.zoom_preview(1.0);
+                cx.notify();
+            })));
+
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .child(toolbar)
+            .child(markdown_element(&preview.blocks, self.explorer.preview_font()))
             .into_any_element()
     }
 }

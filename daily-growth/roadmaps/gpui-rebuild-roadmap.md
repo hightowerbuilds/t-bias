@@ -288,23 +288,29 @@ DB layer built + unit-tested in `app/src/db.rs` while Xcode downloaded. The app-
 - [x] Flip explorer: **⌘E** (and a `⇋` toolbar button) flips the pane terminal ↔ explorer with a
       horizontal card-flip squish (`with`-timer animation, face swaps at t=0.5, terminal frozen
       from PTY-resize mid-flip via a `frozen` flag on `terminal_element`).
-- [ ] Open file behavior: `.md` → Phase 7 preview; others → ignore. (Files are no-op for now.)
+- [x] Open file behavior: `.md`/`.markdown` → Phase 7 preview (clickable in the listing, marked
+      `·md`); other files ignored.
 - [x] **VERIFY:** ✅ on-screen — flip animates, explorer shows the repo, folder/`..` navigation
       works, flips back to a live terminal. (First feature verified visually post-Blade-fix.)
 - [x] Commit: `feat(gpui-6): file explorer + flip`.
 
-## Phase 7 — Markdown preview (port the feature we just built)
+## Phase 7 — Markdown preview — DONE
 
-- [ ] Port `renderMarkdown` logic to Rust (or use `pulldown-cmark` + safe HTML-free render).
-- [ ] Decide render approach in GPUI: build GPUI element tree from parsed MD (no HTML).
-- [ ] Support: headings, bold/italic/strike, inline + fenced code, lists (nested), links,
-      images, blockquotes, rules, GFM tables.
-- [ ] Live font-size control (A− / reset / A+).
-- [ ] Display-style skins: Default, Newspaper, Invoice, Diagram (theme structs, not CSS).
-- [ ] Toolbar: back-to-files, filename, style selector, font controls.
-- [ ] Open `.md` from explorer → preview; back returns to listing.
-- [ ] **VERIFY:** render a complex `.md`, switch styles, change font size. ✅
-- [ ] Commit: `feat(gpui-7): markdown preview`.
+- [x] `pulldown-cmark` (GFM: tables + strikethrough) → a `Block`/`Inline` model in
+      `app/src/markdown.rs`, built from the flat event stream with a frame stack. Pure + 7 tests.
+- [x] Render approach: GPUI element tree (no HTML). Flowing rich text via `StyledText` +
+      per-range `HighlightStyle` overrides (bold/italic/strike/inline-code/link); block styling
+      via the div (size/color/line-height).
+- [x] Support: headings (1-6, scaled), bold/italic/strike, inline + fenced code, nested lists,
+      links, images (as links), blockquotes, rules, GFM tables. (Inline code = colored bg, not
+      monospace — HighlightStyle has no font field; refine later.)
+- [x] Live font-size control: A− / reset / A+ (clamped 10-32px), state on the explorer.
+- [~] Display-style skins (Newspaper/Invoice/Diagram) — deferred; one clean dark skin for now.
+- [x] Toolbar: ← back-to-files, filename, font controls.
+- [x] Open `.md` from explorer → preview; back returns to listing. Navigating away closes it.
+- [x] **VERIFY:** ✅ on-screen — rendered a complex `.md`, adjusted font size, went back;
+      tuned spacing/line-height with the user until it read well.
+- [x] Commit: `feat(gpui-7): markdown preview`.
 
 ## Phase 8 — Config, theming, keybindings
 

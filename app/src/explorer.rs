@@ -8,6 +8,24 @@
 use std::path::{Path, PathBuf};
 
 use crate::fs::{DirEntry, Sandbox};
+use crate::markdown::{self, Block};
+
+/// Preview font-size bounds and default.
+const PREVIEW_FONT_MIN: f32 = 10.0;
+const PREVIEW_FONT_MAX: f32 = 32.0;
+const PREVIEW_FONT_DEFAULT: f32 = 15.0;
+
+/// An open markdown preview: the file name and its parsed blocks.
+pub struct Preview {
+    pub name: String,
+    pub blocks: Vec<Block>,
+}
+
+/// Whether a filename looks like markdown.
+pub fn is_markdown(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown")
+}
 
 /// Explorer navigation state: a directory listing rooted at the repo.
 pub struct Explorer {
@@ -16,6 +34,9 @@ pub struct Explorer {
     rel: String,
     entries: Vec<DirEntry>,
     error: Option<String>,
+    /// Open markdown preview, if any (shown instead of the listing).
+    preview: Option<Preview>,
+    preview_font: f32,
 }
 
 impl Explorer {
@@ -27,9 +48,51 @@ impl Explorer {
             rel: String::new(),
             entries: Vec::new(),
             error: None,
+            preview: None,
+            preview_font: PREVIEW_FONT_DEFAULT,
         };
         explorer.refresh();
         explorer
+    }
+
+    /// Open a markdown file in the preview (read via the sandbox + parse).
+    pub fn open_file(&mut self, name: &str) {
+        if !is_markdown(name) {
+            return;
+        }
+        let sub = if self.rel.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", self.rel, name)
+        };
+        if let Ok(text) = self.sandbox.read_text(&sub) {
+            self.preview = Some(Preview {
+                name: name.to_string(),
+                blocks: markdown::parse(&text),
+            });
+        }
+    }
+
+    pub fn close_preview(&mut self) {
+        self.preview = None;
+    }
+
+    pub fn preview(&self) -> Option<&Preview> {
+        self.preview.as_ref()
+    }
+
+    pub fn preview_font(&self) -> f32 {
+        self.preview_font
+    }
+
+    /// Adjust the preview font size by `delta` px, clamped.
+    pub fn zoom_preview(&mut self, delta: f32) {
+        self.preview_font =
+            (self.preview_font + delta).clamp(PREVIEW_FONT_MIN, PREVIEW_FONT_MAX);
+    }
+
+    pub fn reset_preview_font(&mut self) {
+        self.preview_font = PREVIEW_FONT_DEFAULT;
     }
 
     /// Re-root the explorer to follow the terminal: anchor the sandbox at the
@@ -38,6 +101,7 @@ impl Explorer {
     /// repo, then flipping, lands you exactly where the shell is — and `..` can
     /// browse up to the repo root but no further.
     pub fn follow(&mut self, cwd: &Path) {
+        self.preview = None;
         let (root, rel) = repo_location(cwd);
         self.sandbox = Sandbox::new(root);
         self.rel = rel;
@@ -65,6 +129,7 @@ impl Explorer {
 
     /// Descend into a child directory.
     pub fn enter(&mut self, name: &str) {
+        self.preview = None;
         self.rel = if self.rel.is_empty() {
             name.to_string()
         } else {
@@ -75,6 +140,7 @@ impl Explorer {
 
     /// Go up one directory (no-op at the root).
     pub fn up(&mut self) {
+        self.preview = None;
         match self.rel.rfind('/') {
             Some(idx) => self.rel.truncate(idx),
             None => self.rel.clear(),

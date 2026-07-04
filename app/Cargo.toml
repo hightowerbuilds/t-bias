@@ -24,5 +24,6 @@ anyhow = "1"
 log = "0.4"
 futures = "0.3"
 libc = "0.2"
+pulldown-cmark = { version = "0.13", default-features = false }
 # Bundled SQLite (compiled from source via the C toolchain in CLT) — no ORM.
 rusqlite = { version = "0.32", features = ["bundled"] }

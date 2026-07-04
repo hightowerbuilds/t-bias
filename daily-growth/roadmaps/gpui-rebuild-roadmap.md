@@ -77,28 +77,49 @@ that. Proven: Zed's built-in terminal is GPUI + `alacritty_terminal`.
       (`osascript` process-list check), clean shutdown on kill.
 - [x] Commit: `feat(gpui-0): scaffold native GPUI window`.
 
-## Phase 1 — PTY + alacritty spine (ONE live terminal) ⚠️ make-or-break
+## Phase 1 — PTY + alacritty spine (ONE live terminal) ⚠️ make-or-break — DONE
 
-- [ ] Create `terminal/` module.
-- [ ] Define the alacritty `EventListener` impl (`TbiasListener`) wrapping an
-      `UnboundedSender<AlacEvent>` (channel to the GPUI main thread).
-- [ ] Create `Term<TbiasListener>` with `term::Config` + initial `TermSize` (cols/rows).
-- [ ] Wrap shared state as `Arc<FairMutex<Term<TbiasListener>>>`.
-- [ ] Spawn shell via `portable-pty`: open PTY pair, `CommandBuilder` (login shell `-l`,
-      `TERM=xterm-256color`, `COLORTERM=truecolor`, cwd, HOME), take reader/writer.
-- [ ] Implement `pty_reader_loop` (detached thread):
-  - [ ] Read PTY into a 4096-byte buffer.
-  - [ ] `processor.advance(&mut *term.lock(), &buf[..n])` (VTE `Processor`).
-  - [ ] Emit `AlacEvent::Wakeup` outside synchronized-output windows.
-  - [ ] Break on read 0 / error (shell exit).
-- [ ] Implement `pty_message_loop` (detached thread): receive `Msg` over `mpsc`
-      (`Input(bytes)`, `Resize(size)`, `Shutdown`) and act on the PTY.
-- [ ] Bridge the `AlacEvent` receiver to GPUI: on the main thread, drain wakeups for up
-      to **4 ms / 100 events**, then one `cx.update()` + `cx.notify()`.
-- [ ] Handle `AlacEvent::Exit` / `ChildExit` → mark pane dead, notify.
-- [ ] **VERIFY:** the window shows a live shell; typing a hardcoded command (or piping
-      input) produces visible output. Even ugly rendering counts. ✅ PTY streaming works.
-- [ ] Commit: `feat(gpui-1): PTY + alacritty_terminal spine`.
+- [x] Create the terminal module → `app/src/terminal.rs` (single file for now; split later).
+- [x] Define the alacritty `EventListener` impl (`TbiasListener`) wrapping an
+      `UnboundedSender<AlacEvent>` (channel to the GPUI main thread). Uses
+      `futures::channel::mpsc::unbounded` (added `futures = "0.3"` dep) — receiver is a `Stream`
+      awaitable in a gpui task; sender is `Send + Sync` for the emulation layer.
+- [x] Create `Term<TbiasListener>` with `term::Config::default()` + initial size.
+      Note: `TermSize` lives in `alacritty_terminal::term::test`; defined our own
+      `TerminalSize` implementing `grid::Dimensions` instead of leaning on the test helper.
+- [x] Wrap shared state as `Arc<FairMutex<Term<TbiasListener>>>` (`alacritty_terminal::sync`).
+- [x] Spawn shell via `portable-pty`: `native_pty_system().openpty()`, `CommandBuilder`
+      (login shell `-l`, `TERM=xterm-256color`, `COLORTERM=truecolor`, cwd=`$HOME`). Note:
+      `CommandBuilder::new` seeds env from `std::env::vars_os()`, so PATH etc. are inherited.
+      Drop the slave after spawn so the master read hits EOF on child exit.
+- [x] Implement `pty_reader_loop` (detached thread):
+  - [x] Read PTY into a 4096-byte buffer.
+  - [x] `processor.advance(&mut *term.lock(), &buf[..n])` — parser is
+        `alacritty_terminal::vte::ansi::Processor::<StdSyncHandler>` (needs the explicit
+        `Timeout` type param; `Term` impls `vte::ansi::Handler`).
+  - [x] Emit `AlacEvent::Wakeup` after each parse pass. (We drive the parser by hand, so we
+        emit our own wakeups; alacritty's own `event_loop` would otherwise do this. Redundant
+        wakeups during synchronized-output windows are harmless — refine in Phase 2.)
+  - [x] Break on read 0 / error, then emit `AlacEvent::Exit`.
+- [x] Implement `pty_message_loop` (detached thread): receive `Msg` over `std::sync::mpsc`
+      (`Input(bytes)` → write+flush, `Resize(size)` → `master.resize`, `Shutdown` → `child.kill`).
+      `Terminal`'s `Drop` sends `Shutdown` so the shell is killed when the pane goes away.
+- [x] Bridge the `AlacEvent` receiver to GPUI via `cx.spawn` async loop: `events.next().await`
+      then drain queued events with `try_recv`, coalescing a burst into one `cx.notify()`.
+      (Simplified the "4 ms / 100 events" budget to burst-coalescing for Phase 1; revisit under
+      load in Phase 2.)
+- [x] Handle `AlacEvent::Exit` / `ChildExit` → `terminal.mark_exited()` + notify; UI shows
+      `[shell exited]`.
+- [x] **VERIFY:** ✅ Window opens with a live login shell. Rendering is a naive per-line text
+      dump (`visible_lines()`) — Phase 2 replaces it with a real cell element. Confirmed the full
+      PTY → VTE → Term → UI path by driving two startup commands and reading back the parsed
+      grid: real zsh prompt, `echo` output, and `uname -a` + `ls` listing all present. Clean
+      build (CLT only), app launches and stays up.
+- [x] Commit: `feat(gpui-1): PTY + alacritty_terminal spine`.
+
+  Follow-ups deferred to later phases: pixel size in `TermSize` for full-screen apps (P2),
+  wakeup batching budget under load (P2), real keyboard input replaces the hardcoded startup
+  commands (P3).
 
 ## Phase 2 — Terminal rendering (TerminalElement)
 

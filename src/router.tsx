@@ -2,48 +2,30 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  Link,
   Outlet,
 } from "@tanstack/solid-router";
+import Workspace from "./workspace/Workspace";
 import Home from "./routes/Home";
-import TerminalRoute from "./routes/TerminalRoute";
 
+// Root has no chrome — the Workspace owns its own tab bar. /debug keeps the
+// Phase 0 spine check (HTTP/WS/hotkeys bridges) around for diagnostics.
 const rootRoute = createRootRoute({
-  component: () => (
-    <div class="app-shell">
-      <nav class="nav">
-        <span class="brand">t-bias</span>
-        <Link to="/" class="nav-link" activeProps={{ class: "nav-link active" }}>
-          Home
-        </Link>
-        <Link
-          to="/terminal"
-          class="nav-link"
-          activeProps={{ class: "nav-link active" }}
-        >
-          Terminal
-        </Link>
-      </nav>
-      <main class="content">
-        <Outlet />
-      </main>
-    </div>
-  ),
+  component: () => <Outlet />,
 });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
+  component: Workspace,
+});
+
+const debugRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/debug",
   component: Home,
 });
 
-const terminalRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/terminal",
-  component: TerminalRoute,
-});
-
-const routeTree = rootRoute.addChildren([indexRoute, terminalRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, debugRoute]);
 
 export const router = createRouter({ routeTree });
 

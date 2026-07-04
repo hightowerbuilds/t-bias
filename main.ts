@@ -10,10 +10,16 @@
 //
 // The BrowserWindow block is guarded so the same file works in both contexts.
 
+import { join } from "jsr:@std/path";
 import { PtyBridge } from "./pty_bridge.ts";
 
-const DIST = new URL("./dist/", import.meta.url);
-const PORT = Number(Deno.env.get("PORT") ?? "4321");
+// `deno desktop` relocates the compiled code to a temp dir, so import.meta.url
+// can't locate dist/. Anchor to the working directory instead (the project dir
+// under --hmr; the bundle dir once packaging is solved in Phase 5).
+const DIST = join(Deno.cwd(), "dist");
+// Under `deno desktop` the runtime auto-assigns the port and points the webview
+// at it, so we only pin a port for browser dev (PORT=4321 deno run main.ts).
+const PORT_ENV = Deno.env.get("PORT");
 
 // Rust PTY sidecar supervisor. Started on first use.
 const bridge = new PtyBridge();
@@ -38,18 +44,18 @@ function contentType(path: string): string {
 async function serveStatic(pathname: string): Promise<Response> {
   const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   try {
-    const file = await Deno.readFile(new URL(rel, DIST));
+    const file = await Deno.readFile(join(DIST, rel));
     return new Response(file, { headers: { "content-type": contentType(rel) } });
   } catch {
     // SPA fallback: hand unknown paths to the client router.
     try {
-      const html = await Deno.readFile(new URL("index.html", DIST));
+      const html = await Deno.readFile(join(DIST, "index.html"));
       return new Response(html, {
         headers: { "content-type": CONTENT_TYPES.html },
       });
     } catch {
       return new Response(
-        "No build found. Run `bun run build` first.",
+        "No build found. Run `deno task build` first.",
         { status: 500 },
       );
     }
@@ -98,21 +104,12 @@ function handler(req: Request): Response | Promise<Response> {
 }
 
 Deno.serve(
-  { port: PORT, onListen: ({ port }) => console.log(`t-bias backend → http://localhost:${port}`) },
+  {
+    ...(PORT_ENV ? { port: Number(PORT_ENV) } : {}),
+    onListen: ({ hostname, port }) =>
+      console.log(`t-bias → http://${hostname}:${port}`),
+  },
   handler,
 );
-
-// Native window — only present under `deno desktop`. No-op in browser dev.
-const D = Deno as unknown as { BrowserWindow?: new (opts: unknown) => unknown };
-if (typeof D.BrowserWindow === "function") {
-  try {
-    new D.BrowserWindow({
-      title: "t-bias",
-      width: 1100,
-      height: 720,
-      url: `http://localhost:${PORT}/`,
-    });
-  } catch (err) {
-    console.error("BrowserWindow init failed; continuing as web server:", err);
-  }
-}
+// `deno desktop` auto-creates the window and navigates it to the served
+// address — no explicit BrowserWindow needed.

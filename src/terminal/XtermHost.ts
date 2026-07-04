@@ -7,6 +7,8 @@ import "@xterm/xterm/css/xterm.css";
 
 // Lean xterm.js wrapper. Phase 2 will grow this (search, themes, host cache);
 // for Phase 1 it just needs to render, size, and shuttle bytes.
+const DEFAULT_FONT_SIZE = 13;
+
 export class XtermHost {
   readonly term: Terminal;
   #fit: FitAddon;
@@ -14,7 +16,7 @@ export class XtermHost {
   constructor(container: HTMLElement) {
     this.term = new Terminal({
       fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-      fontSize: 13,
+      fontSize: DEFAULT_FONT_SIZE,
       cursorBlink: true,
       allowProposedApi: true,
       theme: { background: "#0d1117", foreground: "#e6edf3" },
@@ -57,6 +59,31 @@ export class XtermHost {
 
   focus(): void {
     this.term.focus();
+  }
+
+  /** Detach the terminal's DOM element without destroying state. Used when a
+   *  pane component unmounts during a split/tree restructure. */
+  detach(): void {
+    const el = this.term.element;
+    el?.parentElement?.removeChild(el);
+  }
+
+  /** Reparent the preserved terminal element into a new container. */
+  reattach(container: HTMLElement): void {
+    const el = this.term.element;
+    if (el) container.appendChild(el);
+    this.fit();
+  }
+
+  zoom(delta: number): void {
+    const current = this.term.options.fontSize ?? DEFAULT_FONT_SIZE;
+    this.term.options.fontSize = Math.max(8, Math.min(32, current + delta));
+    this.fit();
+  }
+
+  resetZoom(): void {
+    this.term.options.fontSize = DEFAULT_FONT_SIZE;
+    this.fit();
   }
 
   dispose(): void {

@@ -90,15 +90,16 @@ De-risk the unproven path (PTY ↔ Deno ↔ webview streaming) **first**.
 - [x] Deno spawns + supervises the sidecar (`pty_bridge.ts`); teardown on exit (stdin EOF → `close_all`; `unload` → SIGTERM). Reuses the SIGHUP→CONT→TERM→KILL process-group logic.
 - [x] `Deno.serve()` WebSocket (`/pty?pane=N&cols&rows`) streaming PTY output → xterm.js (binary frames out, JSON `{t:"i"|"r"}` in)
 - [x] **One xterm pane running a real login shell** — `XtermHost.ts` + `TerminalRoute.tsx`, bidirectional, ResizeObserver-driven resize. Verified headlessly end-to-end (input executes in zsh, output round-trips) + browser visual.
-- [ ] Validate real apps: `vim`, `htop`, `claude`, heavy output (`yes`) — needs manual/visual pass
-- [ ] **Package the sidecar into the native `.app`** — embed `tbias-pty` + resolve its path at runtime inside the bundle (browser dev path works today; native bundling is unsolved). Ties into Phase 5.
+- [x] Validate real apps: `vim`, `claude`, heavy output (`yes`), and `top` batch mode (`htop` not installed) — passed via automated PTY harness
+- [x] **Package the sidecar into the native `.app`** — `deno task desktop:build` copies `tbias-pty` into `Contents/MacOS`, resolves at runtime via `Deno.execPath()`, and re-signs the bundle
 
-### Phase 2 — Panes / tabs
-- [ ] Port `pane-tree.ts` (split/terminal/editor tree, directional nav)
-- [ ] Port `workspace-state.ts` + `session-state.ts` transitions
-- [ ] Tabs, horizontal/vertical splits, zoom, pane focus
-- [ ] Terminal host cache for stability across remounts (splits)
-- [ ] Global keybindings via tinykeys (splits, zoom, nav, tab switch, queue advance)
+### Phase 2 — Panes / tabs ✅ (spine built; visual pass pending)
+- [x] Ported `pane-tree.ts` (terminal + split tree, split/close/adjacent nav; editor/canvas leaf types deferred to Phase 4)
+- [x] Workspace transitions rewritten leaner for the new stack (`workspace/store.ts`, createStore-based). `session-state.ts` serialization deferred to Phase 3.
+- [x] Tabs, horizontal/vertical splits, zoom, pane focus + active-border
+- [x] Terminal **session cache** (`terminal/session.ts`) — xterm host + `/pty` WebSocket survive split/zoom remounts (detach/reattach, not reconnect)
+- [x] Global keybindings via tinykeys (⌘T/W/D, ⌘⇧D, ⌘⏎ zoom, ⌘1-9, ⌘[/], ⌘⌥arrows nav, ⌘±/0 font). Toolbar buttons duplicate splits/zoom/close since browsers swallow ⌘T/⌘W in dev.
+- [ ] Visual pass: multi-tab, nested splits, divider drag, zoom, pane nav, per-pane live shells (splits, zoom, nav, tab switch, queue advance)
 
 ### Phase 3 — Persistence (Drizzle + SQLite)
 - [ ] Drizzle schema: sessions/workspace layout, shell records, prompts (+tags), canvases

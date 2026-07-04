@@ -12,7 +12,8 @@
   "tasks": {
     "serve": "deno run -A --watch main.ts",
     "desktop": "deno desktop main.ts",
-    "desktop:hmr": "deno desktop --hmr main.ts"
+    "desktop:hmr": "deno desktop --hmr main.ts",
+    "desktop:build": "bun run build && deno task desktop && deno run -A scripts/package-sidecar.ts"
   },
   "fmt": {
     "exclude": ["dist/", "dist-app/", "node_modules/"]

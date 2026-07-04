@@ -8,11 +8,32 @@
 
 import { TextLineStream } from "jsr:@std/streams/text-line-stream";
 import { decodeBase64, encodeBase64 } from "jsr:@std/encoding/base64";
+import { dirname, join } from "jsr:@std/path";
 
-const SIDECAR_BIN = new URL(
-  "./sidecar/target/release/tbias-pty",
-  import.meta.url,
-);
+// Resolve the Rust sidecar binary. Order:
+// 1. TBIAS_PTY env override (dev / custom installs)
+// 2. project dev build (cwd/sidecar/target/release/tbias-pty)
+// 3. packaged .app: next to the executable (Contents/MacOS/tbias-pty)
+// 4. packaged .app: in Resources/sidecar/tbias-pty
+async function resolveSidecarBin(): Promise<string> {
+  const env = Deno.env.get("TBIAS_PTY");
+  if (env) return env;
+
+  const candidates = [
+    join(Deno.cwd(), "sidecar", "target", "release", "tbias-pty"),
+    join(dirname(Deno.execPath()), "tbias-pty"),
+    join(dirname(Deno.execPath()), "..", "Resources", "sidecar", "tbias-pty"),
+  ];
+
+  for (const p of candidates) {
+    try {
+      const stat = await Deno.stat(p);
+      if (stat.isFile) return p;
+    } catch { /* not found */ }
+  }
+
+  return candidates[0];
+}
 
 interface Frame {
   type: string;
@@ -34,13 +55,16 @@ export class PtyBridge {
   #sockets = new Map<number, WebSocket>();
   #enc = new TextEncoder();
   #started = false;
+  #sidecarBin?: string;
 
   /** Spawn the sidecar and begin pumping its stdout/stderr. Idempotent. */
   async start(): Promise<void> {
     if (this.#started) return;
     this.#started = true;
 
-    const command = new Deno.Command(SIDECAR_BIN, {
+    this.#sidecarBin = await resolveSidecarBin();
+    console.log(`[pty] using sidecar: ${this.#sidecarBin}`);
+    const command = new Deno.Command(this.#sidecarBin, {
       stdin: "piped",
       stdout: "piped",
       stderr: "piped",

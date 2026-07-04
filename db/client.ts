@@ -8,7 +8,7 @@ import { dirname, join } from "jsr:@std/path";
 import { drizzle } from "npm:drizzle-orm/sqlite-proxy";
 import * as schema from "./schema.ts";
 
-function appDataDir(): string {
+export function appDataDir(): string {
   const home = Deno.env.get("HOME");
   const exe = Deno.execPath();
 

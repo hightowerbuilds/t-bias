@@ -11,12 +11,32 @@
 // The BrowserWindow block is guarded so the same file works in both contexts.
 
 import { join } from "jsr:@std/path";
+import { appDataDir } from "./db/client.ts";
 import { migrate } from "./db/migrate.ts";
 import { loadWorkspace, saveWorkspace } from "./db/workspace.ts";
 import { PtyBridge } from "./pty_bridge.ts";
 
+// Startup logging: console + file. Helps debug packaged app launches where stdout
+// is not visible.
+const STARTUP_LOG = join(appDataDir(), "startup.log");
+function logStartup(msg: string) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  console.log(line.trimEnd());
+  try {
+    Deno.writeTextFileSync(STARTUP_LOG, line, { append: true });
+  } catch {
+    // ignore logging failures
+  }
+}
+
 // Run migrations before serving.
-migrate();
+try {
+  migrate();
+  logStartup("migrations complete");
+} catch (e) {
+  logStartup(`migration error: ${e}`);
+  throw e;
+}
 
 // `deno desktop` relocates the compiled code to a temp dir, so import.meta.url
 // can't locate dist/. Anchor to the working directory instead (the project dir
@@ -119,13 +139,19 @@ async function handler(req: Request): Promise<Response> {
   return serveStatic(url.pathname);
 }
 
-Deno.serve(
-  {
-    ...(PORT_ENV ? { port: Number(PORT_ENV) } : {}),
-    onListen: ({ hostname, port }) =>
-      console.log(`t-bias → http://${hostname}:${port}`),
-  },
-  handler,
-);
+try {
+  Deno.serve(
+    {
+      ...(PORT_ENV ? { port: Number(PORT_ENV) } : {}),
+      onListen: ({ hostname, port }) => {
+        logStartup(`server listening on http://${hostname}:${port}`);
+      },
+    },
+    handler,
+  );
+} catch (e) {
+  logStartup(`server error: ${e}`);
+  throw e;
+}
 // `deno desktop` auto-creates the window and navigates it to the served
 // address — no explicit BrowserWindow needed.

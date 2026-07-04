@@ -1,4 +1,6 @@
-import { For, onCleanup, onMount } from "solid-js";
+import { createEffect, For, onCleanup, onMount } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { loadWorkspace, saveWorkspace } from "../lib/api";
 import { registerHotkeys } from "../lib/hotkeys";
 import { createWorkspace } from "./store";
 import Panes from "./Panes";
@@ -8,6 +10,21 @@ import TabBar from "./TabBar";
 // mounted (visibility-toggled) so background terminals keep running.
 export default function Workspace() {
   const ws = createWorkspace();
+  const workspaceQuery = useQuery(() => ({
+    queryKey: ["workspace"],
+    queryFn: loadWorkspace,
+  }));
+
+  // Hydrate once from the persisted workspace, if any.
+  let hydrated = false;
+  createEffect(() => {
+    if (!workspaceQuery.isSuccess || workspaceQuery.isFetching) return;
+    const data = workspaceQuery.data;
+    if (data && !hydrated) {
+      hydrated = true;
+      ws.hydrate(data);
+    }
+  });
 
   onMount(() => {
     const unsub = registerHotkeys({
@@ -32,7 +49,20 @@ export default function Workspace() {
         ]),
       ),
     });
-    onCleanup(unsub);
+
+    const save = () => {
+      try {
+        saveWorkspace(ws.snapshot());
+      } catch {
+        // Don't block shutdown on a failed save.
+      }
+    };
+    window.addEventListener("beforeunload", save);
+
+    onCleanup(() => {
+      unsub();
+      window.removeEventListener("beforeunload", save);
+    });
   });
 
   return (

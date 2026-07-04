@@ -11,7 +11,12 @@
 // The BrowserWindow block is guarded so the same file works in both contexts.
 
 import { join } from "jsr:@std/path";
+import { migrate } from "./db/migrate.ts";
+import { loadWorkspace, saveWorkspace } from "./db/workspace.ts";
 import { PtyBridge } from "./pty_bridge.ts";
+
+// Run migrations before serving.
+migrate();
 
 // `deno desktop` relocates the compiled code to a temp dir, so import.meta.url
 // can't locate dist/. Anchor to the working directory instead (the project dir
@@ -62,7 +67,7 @@ async function serveStatic(pathname: string): Promise<Response> {
   }
 }
 
-function handler(req: Request): Response | Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
 
   if (url.pathname === "/api/ping") {
@@ -71,6 +76,17 @@ function handler(req: Request): Response | Promise<Response> {
       runtime: `Deno ${Deno.version.deno}`,
       ts: Date.now(),
     });
+  }
+
+  if (url.pathname === "/api/workspace" && req.method === "GET") {
+    const ws = await loadWorkspace();
+    return Response.json(ws ?? null);
+  }
+
+  if (url.pathname === "/api/workspace/save" && req.method === "POST") {
+    const body = await req.json();
+    await saveWorkspace(body);
+    return Response.json({ ok: true });
   }
 
   if (url.pathname === "/ws") {

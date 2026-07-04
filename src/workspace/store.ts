@@ -22,6 +22,12 @@ export interface Tab {
   titles: Record<number, string>;
 }
 
+export interface WorkspaceSnapshot {
+  tabs: (Tab & { sortOrder: number })[];
+  activeTabId: number;
+  nextId: number;
+}
+
 export interface Workspace {
   tabs: Tab[];
   setTabs: SetStoreFunction<Tab[]>;
@@ -41,6 +47,8 @@ export interface Workspace {
   handleShellExit: (paneId: number) => void;
   fontZoom: (delta: number) => void;
   fontZoomReset: () => void;
+  hydrate: (snapshot: WorkspaceSnapshot) => void;
+  snapshot: () => WorkspaceSnapshot;
 }
 
 let counter = 1;
@@ -203,6 +211,26 @@ export function createWorkspace(): Workspace {
     if (p != null) resetTerminalZoom(p);
   };
 
+  const hydrate = (s: WorkspaceSnapshot) => {
+    // Tear down any default tab that was created before hydration.
+    for (const tab of tabs) {
+      for (const pid of terminalIds(tab.panes, tab.rootId)) destroyTerminal(pid);
+    }
+    counter = Math.max(counter, s.nextId);
+    setTabs(s.tabs);
+    setActiveTabId(s.activeTabId);
+    queueMicrotask(() => {
+      const tab = activeTab();
+      if (tab) focusTerminal(tab.activePaneId);
+    });
+  };
+
+  const snapshot = (): WorkspaceSnapshot => ({
+    tabs: tabs.map((tab, i) => ({ ...tab, sortOrder: i })),
+    activeTabId: activeTabId(),
+    nextId: counter,
+  });
+
   return {
     tabs,
     setTabs,
@@ -222,5 +250,7 @@ export function createWorkspace(): Workspace {
     handleShellExit,
     fontZoom,
     fontZoomReset,
+    hydrate,
+    snapshot,
   };
 }

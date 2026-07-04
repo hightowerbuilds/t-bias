@@ -1,3 +1,5 @@
+import type { WorkspaceSnapshot } from "../workspace/store";
+
 // Backend bridge to the Deno process (main.ts).
 //
 // Two channels, both same-origin (Deno.serve hosts the SPA):
@@ -22,4 +24,21 @@ export function openEcho(onMessage: (msg: string) => void): WebSocket {
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.addEventListener("message", (e) => onMessage(String(e.data)));
   return ws;
+}
+
+export interface SavedWorkspace extends WorkspaceSnapshot {}
+
+export async function loadWorkspace(): Promise<SavedWorkspace | null> {
+  const res = await fetch("/api/workspace");
+  if (!res.ok) throw new Error(`load workspace failed: ${res.status}`);
+  return res.json();
+}
+
+export async function saveWorkspace(state: SavedWorkspace): Promise<void> {
+  const res = await fetch("/api/workspace/save", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(state),
+  });
+  if (!res.ok) throw new Error(`save workspace failed: ${res.status}`);
 }

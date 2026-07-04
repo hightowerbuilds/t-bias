@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# t-bias dev launcher — builds and opens the native GPUI app.
+# t-bias dev launcher — builds the newest version and opens exactly one window.
 #
-#   ./dev            debug build + run (fast compile, slower app)
-#   ./dev release    optimized build + run (slow first compile, fast app)
+#   ./dev            debug: build newest, kill the old instance, launch (fast compile)
+#   ./dev release    optimized build (slow first compile, snappier app)
 #   ./dev build      compile only, don't launch
+#   ./dev clean      cargo clean — reclaim target/ disk (full rebuild next time)
 #   ./dev -- <args>  pass extra args through to the binary
 #
-# The GPUI app lives in app/. This is the whole dev loop for now — no webview,
-# no sidecar, no packaging (that's Phase 11). Just cargo.
+# Always builds before launching, and only replaces the running app if the build
+# succeeds (a broken build leaves your current window alone). Kills any prior
+# instance first so windows don't pile up. The GPUI app lives in app/.
 
 set -euo pipefail
 
@@ -16,12 +18,14 @@ APP_DIR="$REPO_DIR/app"
 
 mode="run"
 profile=""
+profile_dir="debug"
 passthrough=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    release) profile="--release"; shift ;;
+    release) profile="--release"; profile_dir="release"; shift ;;
     build)   mode="build"; shift ;;
+    clean)   mode="clean"; shift ;;
     --)      shift; passthrough=("$@"); break ;;
     *)       passthrough+=("$1"); shift ;;
   esac
@@ -29,14 +33,42 @@ done
 
 cd "$APP_DIR"
 
-if [[ "$mode" == "build" ]]; then
-  echo "▸ building t-bias ($([[ -n "$profile" ]] && echo release || echo debug))…"
-  exec cargo build $profile
+if [[ "$mode" == "clean" ]]; then
+  echo "▸ cargo clean (freeing $(du -sh target 2>/dev/null | cut -f1 || echo target/))…"
+  exec cargo clean
 fi
 
-echo "▸ launching t-bias ($([[ -n "$profile" ]] && echo release || echo debug))…"
+# Build the newest version first. If this fails, we bail before touching the
+# currently-running instance.
+echo "▸ building t-bias ($profile_dir)…"
+cargo build $profile
+
+if [[ "$mode" == "build" ]]; then
+  exit 0
+fi
+
+# Replace, don't stack: stop any running t-bias build so we never accumulate
+# stale windows/processes. Matches both relative (`target/debug/t-bias`) and
+# absolute launches.
+running() {
+  pgrep -f "target/debug/t-bias" >/dev/null 2>&1 \
+    || pgrep -f "target/release/t-bias" >/dev/null 2>&1
+}
+if running; then
+  echo "▸ stopping previous instance…"
+  pkill -f "target/debug/t-bias" 2>/dev/null || true
+  pkill -f "target/release/t-bias" 2>/dev/null || true
+  # Give the old process a beat to release the window before the new one opens.
+  for _ in 1 2 3 4 5; do
+    running || break
+    sleep 0.2
+  done
+fi
+
+BIN="$APP_DIR/target/$profile_dir/t-bias"
+echo "▸ launching $BIN"
 if [[ ${#passthrough[@]} -gt 0 ]]; then
-  exec cargo run $profile -- "${passthrough[@]}"
+  exec "$BIN" "${passthrough[@]}"
 else
-  exec cargo run $profile
+  exec "$BIN"
 fi

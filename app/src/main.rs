@@ -11,6 +11,7 @@ mod input;
 mod pane_tree;
 mod terminal;
 mod terminal_view;
+mod workspace;
 
 use alacritty_terminal::event::Event as AlacEvent;
 use alacritty_terminal::grid::Scroll;

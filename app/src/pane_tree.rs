@@ -286,6 +286,21 @@ impl PaneTree {
         Some(self.first_leaf(sibling))
     }
 
+    /// Replace an existing leaf with a different leaf pane (used by flip). No-op
+    /// (returns false) if `id` is absent, not a leaf, or `pane` isn't a leaf.
+    pub fn replace_leaf(&mut self, id: PaneId, pane: Pane) -> bool {
+        if !pane.is_leaf() {
+            return false;
+        }
+        match self.panes.get(&id) {
+            Some(existing) if existing.is_leaf() => {
+                self.panes.insert(id, pane);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Clamp and set a split's ratio. No-op if `id` is not a split.
     pub fn set_ratio(&mut self, id: PaneId, ratio: f32) {
         if let Some(Pane::Split { ratio: r, .. }) = self.panes.get_mut(&id) {

@@ -22,6 +22,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::pane_tree::{Pane, PaneId, PaneTree, SplitDir};
+use crate::workspace::{Tab, Workspace};
 
 /// The single workspace we persist (multi-workspace is out of scope).
 const WORKSPACE_ID: i64 = 1;
@@ -69,25 +70,6 @@ CREATE TABLE IF NOT EXISTS shells (
     exited_at  INTEGER
 );
 ";
-
-/// One tab: a titled pane layout with an active pane and zoom flag.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Tab {
-    pub id: u64,
-    pub title: String,
-    pub active_pane: PaneId,
-    pub zoomed: bool,
-    pub tree: PaneTree,
-}
-
-/// The persisted workspace: ordered tabs plus the active tab and id allocator.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Workspace {
-    pub name: String,
-    pub active_tab: u64,
-    pub next_tab_id: u64,
-    pub tabs: Vec<Tab>,
-}
 
 /// A shell lifecycle record.
 #[derive(Clone, Debug, PartialEq)]

@@ -210,8 +210,16 @@ control-code / CSI / app-cursor / modifier logic is pinned by tests, not eyeball
       rewire/close-collapse/close-nested-grandparent/close-root-noop/adjacent/ratio-clamp/
       split-non-leaf-errors/type-filters), all pass. (Built ahead of UI wiring, which is blocked
       on the text-rendering fix.)
-- [ ] Workspace state entity: tabs, active tab, active pane, per-tab pane tree, zoom, nextId.
-- [ ] Terminal session cache keyed by pane id (session survives split/zoom re-layout).
+- [x] Workspace state → `app/src/workspace.rs`: `Workspace { name, active_tab, next_tab_id,
+      tabs }` + `Tab { id, title, active_pane, zoomed, tree }` (moved here from `db.rs` — it's
+      the same struct the DB persists, no separate snapshot type). Ops ported from
+      `store.ts`: add/close/select/cycle tab, split_active, close_active_pane (only-pane →
+      close tab; last tab → fresh one), activate_pane, navigate (zoom-aware), toggle_zoom,
+      set_ratio, flip_active (terminal↔explorer), handle_shell_exit. 10 tests. (UI side effects —
+      focus, font-zoom — are the renderer's job, excluded.)
+- [~] Terminal session cache keyed by pane id — the state model is UI-free; the live session
+      cache keys on **(tab id, pane id)** (pane ids are per-tree, not globally unique) and lands
+      with the UI wiring.
 - [ ] Tab bar UI (gpui-component tabs): add/close/select/reorder, active styling.
 - [ ] Split rendering: recursive layout with draggable dividers (h/v), ratio clamp [0.1,0.9].
 - [ ] Divider drag → update ratio → relayout (use `Rc<Cell<f32>>` for drag state).

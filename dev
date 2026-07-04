@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# t-bias dev launcher — builds and opens the native GPUI app.
+#
+#   ./dev            debug build + run (fast compile, slower app)
+#   ./dev release    optimized build + run (slow first compile, fast app)
+#   ./dev build      compile only, don't launch
+#   ./dev -- <args>  pass extra args through to the binary
+#
+# The GPUI app lives in app/. This is the whole dev loop for now — no webview,
+# no sidecar, no packaging (that's Phase 11). Just cargo.
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$REPO_DIR/app"
+
+mode="run"
+profile=""
+passthrough=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    release) profile="--release"; shift ;;
+    build)   mode="build"; shift ;;
+    --)      shift; passthrough=("$@"); break ;;
+    *)       passthrough+=("$1"); shift ;;
+  esac
+done
+
+cd "$APP_DIR"
+
+if [[ "$mode" == "build" ]]; then
+  echo "▸ building t-bias ($([[ -n "$profile" ]] && echo release || echo debug))…"
+  exec cargo build $profile
+fi
+
+echo "▸ launching t-bias ($([[ -n "$profile" ]] && echo release || echo debug))…"
+if [[ ${#passthrough[@]} -gt 0 ]]; then
+  exec cargo run $profile -- "${passthrough[@]}"
+else
+  exec cargo run $profile
+fi

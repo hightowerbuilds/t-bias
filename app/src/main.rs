@@ -437,6 +437,9 @@ impl Render for Root {
             .flex()
             .justify_center()
             .overflow_hidden()
+            // Breathing room from the window edges for every face.
+            .px_4()
+            .pb_2()
             .child(div().h_full().w(relative(scale)).child(face_el));
 
         div()

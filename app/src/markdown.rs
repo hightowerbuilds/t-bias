@@ -329,7 +329,7 @@ pub fn markdown_element(blocks: &[Block], font_size: f32) -> AnyElement {
         .gap(px(font_size * 0.5))
         .size_full()
         .overflow_y_scroll()
-        .px_4()
+        .px_1()
         .py_3()
         .font_family(PROSE_FONT)
         .text_size(px(font_size))

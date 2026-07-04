@@ -1,6 +1,7 @@
 import { createEffect, For, onCleanup, onMount } from "solid-js";
 import { useQuery } from "@tanstack/solid-query";
-import { loadWorkspace, saveWorkspace } from "../lib/api";
+import { debounce } from "../lib/debounce";
+import { loadWorkspace, saveWorkspace, type SavedWorkspace } from "../lib/api";
 import { registerHotkeys } from "../lib/hotkeys";
 import { createWorkspace } from "./store";
 import Panes from "./Panes";
@@ -24,6 +25,26 @@ export default function Workspace() {
       hydrated = true;
       ws.hydrate(data);
     }
+  });
+
+  // Auto-save workspace layout changes (debounced).
+  const AUTOSAVE_MS = 500;
+  const sendSnapshot = (snapshot: SavedWorkspace) => {
+    const blob = new Blob([JSON.stringify(snapshot)], { type: "application/json" });
+    if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+      navigator.sendBeacon("/api/workspace/save", blob);
+      return;
+    }
+    saveWorkspace(snapshot).catch(() => {});
+  };
+  const debouncedSave = debounce(sendSnapshot, AUTOSAVE_MS);
+
+  createEffect(() => {
+    if (!workspaceQuery.isSuccess || workspaceQuery.isFetching) return;
+    // Track reactive snapshot dependencies.
+    const snapshot = ws.snapshot();
+    // Save the initial default state too, but only after the query has settled.
+    debouncedSave(snapshot);
   });
 
   onMount(() => {
@@ -50,18 +71,19 @@ export default function Workspace() {
       ),
     });
 
-    const save = () => {
-      try {
-        saveWorkspace(ws.snapshot());
-      } catch {
-        // Don't block shutdown on a failed save.
+    const onBeforeUnload = () => sendSnapshot(ws.snapshot());
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        sendSnapshot(ws.snapshot());
       }
     };
-    window.addEventListener("beforeunload", save);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     onCleanup(() => {
       unsub();
-      window.removeEventListener("beforeunload", save);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     });
   });
 

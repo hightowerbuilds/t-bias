@@ -102,10 +102,10 @@ De-risk the unproven path (PTY ↔ Deno ↔ webview streaming) **first**.
 - [ ] Visual pass: multi-tab, nested splits, divider drag, zoom, pane nav, per-pane live shells (splits, zoom, nav, tab switch, queue advance)
 
 ### Phase 3 — Persistence (Drizzle + SQLite)
-- [x] Drizzle schema: workspaces, tabs, panes (manual migration over `node:sqlite`; shell records / prompts / canvases deferred)
+- [x] Drizzle schema: workspaces, tabs, panes, shells (manual migration over `node:sqlite`; prompts / canvases deferred)
 - [~] Migration workflow — manual SQL migrations working; drizzle-kit Deno patch still TBD
 - [x] Restore-on-launch: workspace layout + active tab hydration
-- [ ] Atomic save on shutdown (currently `beforeunload` frontend save; backend unload hook TBD)
+- [x] Atomic save on shutdown — debounced auto-save + `beforeunload`/`visibilitychange` `sendBeacon`, transactional `saveWorkspace`
 
 ### Phase 4 — Feature surfaces
 - [ ] Prompt stacker (save/search/queue, import/export, tags)

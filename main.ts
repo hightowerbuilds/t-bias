@@ -13,6 +13,7 @@
 import { join } from "jsr:@std/path";
 import { appDataDir } from "./db/client.ts";
 import { migrate } from "./db/migrate.ts";
+import { recordShellExit, recordShellSpawn } from "./db/shells.ts";
 import { loadWorkspace, saveWorkspace } from "./db/workspace.ts";
 import { PtyBridge } from "./pty_bridge.ts";
 
@@ -128,10 +129,29 @@ async function handler(req: Request): Promise<Response> {
     const cols = Number(url.searchParams.get("cols") ?? "80");
     const rows = Number(url.searchParams.get("rows") ?? "24");
     const cwd = url.searchParams.get("cwd") ?? undefined;
+    const shell = url.searchParams.get("shell") ?? undefined;
+    const command = shell || Deno.env.get("SHELL") || "/bin/zsh";
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.onopen = async () => {
       await bridge.start();
-      bridge.attach(paneId, socket, { cols, rows, cwd });
+      bridge.attach(paneId, socket, {
+        cols,
+        rows,
+        shell,
+        cwd,
+        callbacks: {
+          onSpawn: (info) => {
+            recordShellSpawn(paneId, info.pid, command, cwd).catch((e) =>
+              logStartup(`recordShellSpawn error: ${e}`)
+            );
+          },
+          onExit: (info) => {
+            recordShellExit(paneId, info.code).catch((e) =>
+              logStartup(`recordShellExit error: ${e}`)
+            );
+          },
+        },
+      });
     };
     return response;
   }

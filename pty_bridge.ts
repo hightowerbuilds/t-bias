@@ -40,6 +40,27 @@ interface Frame {
   paneId?: number;
   data?: string;
   message?: string;
+  pid?: number;
+  command?: string;
+  cwd?: string;
+  code?: number;
+  success?: boolean;
+}
+
+export interface ShellInfo {
+  pid?: number;
+  command?: string;
+  cwd?: string;
+}
+
+export interface ExitInfo {
+  code?: number;
+  success: boolean;
+}
+
+export interface AttachCallbacks {
+  onSpawn?: (info: ShellInfo) => void;
+  onExit?: (info: ExitInfo) => void;
 }
 
 export interface AttachOptions {
@@ -47,12 +68,14 @@ export interface AttachOptions {
   rows: number;
   shell?: string;
   cwd?: string;
+  callbacks?: AttachCallbacks;
 }
 
 export class PtyBridge {
   #child?: Deno.ChildProcess;
   #stdin?: WritableStreamDefaultWriter<Uint8Array>;
   #sockets = new Map<number, WebSocket>();
+  #callbacks = new Map<number, AttachCallbacks>();
   #enc = new TextEncoder();
   #started = false;
   #sidecarBin?: string;
@@ -121,15 +144,29 @@ export class PtyBridge {
         }
         break;
       }
+      case "spawned": {
+        this.#callbacks.get(frame.paneId)?.onSpawn?.({
+          pid: frame.pid,
+          command: frame.command,
+          cwd: frame.cwd,
+        });
+        break;
+      }
       case "exit": {
+        this.#callbacks.get(frame.paneId)?.onExit?.({
+          code: frame.code,
+          success: frame.success ?? false,
+        });
         ws?.close(1000, "shell-exit");
         this.#sockets.delete(frame.paneId);
+        this.#callbacks.delete(frame.paneId);
         break;
       }
       case "error": {
         console.error(`[sidecar] pane ${frame.paneId}: ${frame.message}`);
         ws?.close(1011, "sidecar-error");
         this.#sockets.delete(frame.paneId);
+        this.#callbacks.delete(frame.paneId);
         break;
       }
     }
@@ -138,6 +175,7 @@ export class PtyBridge {
   /** Bind a freshly-opened WebSocket to a pane and spawn its shell. */
   attach(paneId: number, ws: WebSocket, opts: AttachOptions): void {
     this.#sockets.set(paneId, ws);
+    if (opts.callbacks) this.#callbacks.set(paneId, opts.callbacks);
     ws.binaryType = "arraybuffer";
 
     this.#sendToSidecar({

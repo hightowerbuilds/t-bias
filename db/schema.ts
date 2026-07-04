@@ -33,3 +33,16 @@ export const panes = sqliteTable("panes", {
   b: integer("b"),
   cwd: text("cwd"),
 });
+
+export const shells = sqliteTable("shells", {
+  id: integer("id").primaryKey(),
+  paneId: integer("pane_id").notNull(),
+  pid: integer("pid"),
+  command: text("command"),
+  cwd: text("cwd"),
+  status: text("status", { enum: ["running", "exited", "crashed"] })
+    .notNull()
+    .default("running"),
+  startedAt: integer("started_at").notNull(),
+  exitedAt: integer("exited_at"),
+});

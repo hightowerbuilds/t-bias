@@ -34,5 +34,18 @@ export function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_tabs_workspace ON tabs(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_panes_tab ON panes(tab_id);
+
+    CREATE TABLE IF NOT EXISTS shells (
+      id INTEGER PRIMARY KEY,
+      pane_id INTEGER NOT NULL,
+      pid INTEGER,
+      command TEXT,
+      cwd TEXT,
+      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'exited', 'crashed')),
+      started_at INTEGER NOT NULL,
+      exited_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shells_pane ON shells(pane_id);
   `);
 }

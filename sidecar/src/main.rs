@@ -11,8 +11,9 @@
 //
 //   sidecar -> Deno (stdout):
 //     {"type":"ready"}
+//     {"type":"spawned","paneId":N,"pid":P,"command":"...","cwd":"..."}
 //     {"type":"output","paneId":N,"data":"<base64>"}
-//     {"type":"exit","paneId":N}
+//     {"type":"exit","paneId":N,"code":C}
 //     {"type":"error","paneId":N,"message":"..."}
 //
 // PTY byte payloads are base64-encoded so binary data survives the JSON line
@@ -152,6 +153,16 @@ fn spawn(
         _ => std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),
     };
 
+    let chosen_cwd: Option<std::path::PathBuf> = if let Ok(home) = std::env::var("HOME") {
+        cwd.as_deref()
+            .filter(|c| !c.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir())
+            .or_else(|| Some(std::path::PathBuf::from(&home)))
+    } else {
+        None
+    };
+
     let mut cmd = CommandBuilder::new(&shell_path);
     cmd.arg("-l"); // login shell: source profiles, run path_helper
     cmd.env("TERM", "xterm-256color");
@@ -161,13 +172,9 @@ fn spawn(
 
     if let Ok(home) = std::env::var("HOME") {
         cmd.env("HOME", &home);
-        let chosen = cwd
-            .as_deref()
-            .filter(|c| !c.is_empty())
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.is_dir())
-            .unwrap_or_else(|| std::path::PathBuf::from(&home));
-        cmd.cwd(chosen);
+    }
+    if let Some(ref c) = chosen_cwd {
+        cmd.cwd(c);
     }
 
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
@@ -188,6 +195,17 @@ fn spawn(
             child_pid,
             closed: Arc::clone(&closed),
         },
+    );
+
+    emit(
+        &out,
+        json!({
+            "type": "spawned",
+            "paneId": pane_id,
+            "pid": child_pid,
+            "command": shell_path,
+            "cwd": chosen_cwd.as_deref().map(|p| p.to_string_lossy()).unwrap_or_default(),
+        }),
     );
 
     // Reader thread: raw PTY output -> base64 NDJSON output frames.
@@ -216,8 +234,13 @@ fn spawn(
     // Wait thread: notify Deno when the shell process exits.
     let out_e = Arc::clone(out);
     std::thread::spawn(move || {
-        let _ = child.wait();
-        emit(&out_e, json!({ "type": "exit", "paneId": pane_id }));
+        let status = child.wait().ok();
+        let code = status.as_ref().map(|s| s.exit_code() as i64);
+        let success = status.map(|s| s.success()).unwrap_or(false);
+        emit(
+            &out_e,
+            json!({ "type": "exit", "paneId": pane_id, "code": code, "success": success }),
+        );
     });
 
     Ok(())

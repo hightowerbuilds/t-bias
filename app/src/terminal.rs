@@ -31,7 +31,6 @@ pub struct TerminalSize {
 }
 
 impl TerminalSize {
-    #[allow(dead_code)] // used once the element measures real cell size (Phase 2)
     pub fn new(cols: usize, lines: usize) -> Self {
         Self {
             cols: cols.max(1),
@@ -75,8 +74,6 @@ pub enum Msg {
 pub struct Terminal {
     term: Arc<FairMutex<Term<TbiasListener>>>,
     msg_tx: Sender<Msg>,
-    size: TerminalSize,
-    exited: bool,
 }
 
 impl Terminal {
@@ -133,15 +130,7 @@ impl Terminal {
             .spawn(move || pty_message_loop(msg_rx, writer, master, child))
             .expect("spawn pty writer");
 
-        Ok((
-            Self {
-                term,
-                msg_tx,
-                size,
-                exited: false,
-            },
-            event_rx,
-        ))
+        Ok((Self { term, msg_tx }, event_rx))
     }
 
     /// A cheap, cloneable handle the renderer uses to read the grid and push
@@ -153,47 +142,6 @@ impl Terminal {
         }
     }
 
-    /// Resize both the emulator grid and the PTY window.
-    #[allow(dead_code)] // the element drives resize via TerminalHandle
-    pub fn resize(&mut self, size: TerminalSize) {
-        if size == self.size {
-            return;
-        }
-        self.size = size;
-        self.term.lock().resize(size);
-        let _ = self.msg_tx.send(Msg::Resize(size));
-    }
-
-    /// Mark the shell as exited (called when the event stream reports it).
-    pub fn mark_exited(&mut self) {
-        self.exited = true;
-    }
-
-    #[allow(dead_code)] // surfaced in the UI once pane/tab chrome lands (P4)
-    pub fn has_exited(&self) -> bool {
-        self.exited
-    }
-
-    /// Plain-text snapshot of the visible grid (no color/attrs). Superseded for
-    /// display by the Phase 2 cell renderer, but kept as a headless verification
-    /// aid — screen capture is unavailable in this environment.
-    #[allow(dead_code)]
-    pub fn visible_lines(&self) -> Vec<String> {
-        let term = self.term.lock();
-        let cols = term.columns();
-        let rows = term.screen_lines();
-        let mut grid = vec![vec![' '; cols]; rows];
-        for indexed in term.renderable_content().display_iter {
-            let line = indexed.point.line.0;
-            let col = indexed.point.column.0;
-            if line >= 0 && (line as usize) < rows && col < cols {
-                grid[line as usize][col] = indexed.cell.c;
-            }
-        }
-        grid.into_iter()
-            .map(|row| row.into_iter().collect::<String>().trim_end().to_string())
-            .collect()
-    }
 }
 
 impl Drop for Terminal {

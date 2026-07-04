@@ -53,16 +53,9 @@ impl Root {
                                 exited = true;
                             }
                         }
-                        let alive = this
-                            .update(cx, |root, cx| {
-                                if exited {
-                                    if let Some(t) = root.terminal.as_mut() {
-                                        t.mark_exited();
-                                    }
-                                }
-                                cx.notify();
-                            })
-                            .is_ok();
+                        // New content (or shell exit) → repaint. Exit handling
+                        // (mark pane dead, collapse) lands with the Phase 4 UI.
+                        let alive = this.update(cx, |_, cx| cx.notify()).is_ok();
                         if !alive || exited {
                             break;
                         }

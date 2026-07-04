@@ -293,3 +293,86 @@ b.err {
 .term-pane-host .xterm {
   height: 100%;
 }
+
+/* ── Explorer pane ───────────────────────────────────────────────────── */
+.explorer-pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.explorer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.explorer-header button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.explorer-header button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.explorer-path {
+  color: var(--muted);
+  font-family: Menlo, monospace;
+}
+
+.explorer-list {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.explorer-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.explorer-row.directory {
+  color: var(--accent);
+}
+
+.explorer-icon {
+  flex-shrink: 0;
+}
+
+.explorer-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorer-empty {
+  padding: 12px;
+  color: var(--muted);
+}
+
+.explorer-empty.err {
+  color: var(--err);
+}

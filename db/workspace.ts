@@ -1,7 +1,7 @@
 import { eq, inArray } from "npm:drizzle-orm";
 import { db } from "./client.ts";
 import { panes, tabs, workspaces } from "./schema.ts";
-import type { PaneMap, Pane, SplitPane, TerminalPane } from "../src/pane-tree.ts";
+import type { PaneMap, Pane, SplitPane, TerminalPane, ExplorerPane } from "../src/pane-tree.ts";
 
 export interface SavedTab {
   id: number;
@@ -35,6 +35,13 @@ function paneFromRow(row: typeof panes.$inferSelect): Pane {
       b: row.b!,
     } as SplitPane;
   }
+  if (row.type === "explorer") {
+    return {
+      type: "explorer",
+      id: row.id,
+      cwd: row.cwd ?? undefined,
+    } as ExplorerPane;
+  }
   return {
     type: "terminal",
     id: row.id,
@@ -49,7 +56,7 @@ function paneToRows(tabId: number, paneMap: PaneMap): (typeof panes.$inferInsert
         id: pane.id,
         tabId,
         type: "split" as const,
-        parentId: null, // rebuilt from tree if needed; we recompute root from tree shape
+        parentId: null, // rebuilt from tree; recompute root from tree shape
         dir: pane.dir,
         ratio: pane.ratio,
         a: pane.a,
@@ -60,7 +67,7 @@ function paneToRows(tabId: number, paneMap: PaneMap): (typeof panes.$inferInsert
     return {
       id: pane.id,
       tabId,
-      type: "terminal" as const,
+      type: pane.type,
       parentId: null,
       dir: null,
       ratio: null,

@@ -12,6 +12,13 @@ export interface TerminalPane {
   flipped?: boolean;
 }
 
+export interface ExplorerPane {
+  type: "explorer";
+  id: number;
+  /** Directory the explorer is browsing. */
+  cwd?: string;
+}
+
 export interface SplitPane {
   type: "split";
   id: number;
@@ -23,7 +30,8 @@ export interface SplitPane {
   b: number;
 }
 
-export type Pane = TerminalPane | SplitPane;
+export type LeafPane = TerminalPane | ExplorerPane;
+export type Pane = LeafPane | SplitPane;
 export type PaneMap = Record<number, Pane>;
 
 /** All terminal pane IDs in layout order (DFS, a before b). */
@@ -33,7 +41,23 @@ export function terminalIds(panes: PaneMap, rootId: number): number[] {
     const p = panes[id];
     if (!p) return;
     if (p.type === "terminal") out.push(id);
-    else {
+    else if (p.type === "split") {
+      visit(p.a);
+      visit(p.b);
+    }
+  };
+  visit(rootId);
+  return out;
+}
+
+/** All explorer pane IDs in layout order. */
+export function explorerIds(panes: PaneMap, rootId: number): number[] {
+  const out: number[] = [];
+  const visit = (id: number) => {
+    const p = panes[id];
+    if (!p) return;
+    if (p.type === "explorer") out.push(id);
+    else if (p.type === "split") {
       visit(p.a);
       visit(p.b);
     }
@@ -44,7 +68,19 @@ export function terminalIds(panes: PaneMap, rootId: number): number[] {
 
 /** All leaf pane IDs (non-split) in layout order. */
 export function leafIds(panes: PaneMap, rootId: number): number[] {
-  return terminalIds(panes, rootId); // only terminals are leaves for now
+  const out: number[] = [];
+  const visit = (id: number) => {
+    const p = panes[id];
+    if (!p) return;
+    if (p.type === "split") {
+      visit(p.a);
+      visit(p.b);
+    } else {
+      out.push(id);
+    }
+  };
+  visit(rootId);
+  return out;
 }
 
 function findParent(panes: PaneMap, rootId: number, targetId: number): SplitPane | null {
@@ -57,8 +93,8 @@ function findParent(panes: PaneMap, rootId: number, targetId: number): SplitPane
   return visit(rootId);
 }
 
-/** Split terminal `targetId` along `dir`, inserting `splitId` with a new
- *  terminal leaf `newLeafId` as the second child. */
+/** Split leaf `targetId` along `dir`, inserting `splitId` with a new
+ *  leaf of the same type as `targetId` as the second child. */
 export function splitPane(
   panes: PaneMap,
   rootId: number,
@@ -67,8 +103,14 @@ export function splitPane(
   splitId: number,
   newLeafId: number,
 ): { panes: PaneMap; rootId: number } {
+  const target = panes[targetId];
+  if (!target || target.type === "split") {
+    throw new Error(`splitPane target ${targetId} is not a leaf`);
+  }
   const newSplit: SplitPane = { type: "split", id: splitId, dir, ratio: 0.5, a: targetId, b: newLeafId };
-  const newLeaf: TerminalPane = { type: "terminal", id: newLeafId };
+  const newLeaf: LeafPane = target.type === "explorer"
+    ? { type: "explorer", id: newLeafId, cwd: target.cwd }
+    : { type: "terminal", id: newLeafId, cwd: target.cwd };
   const next: PaneMap = { ...panes, [splitId]: newSplit, [newLeafId]: newLeaf };
 
   const parent = findParent(panes, rootId, targetId);
@@ -83,7 +125,7 @@ export function splitPane(
   return { panes: next, rootId: splitId };
 }
 
-/** Remove terminal `targetId`, collapsing its parent split. Returns the pane
+/** Remove leaf `targetId`, collapsing its parent split. Returns the pane
  *  that inherits the slot as `focusId`. If target is the root, it's a no-op. */
 export function closePane(
   panes: PaneMap,
@@ -105,16 +147,16 @@ export function closePane(
       a: grandparent.a === parent.id ? siblingId : grandparent.a,
       b: grandparent.b === parent.id ? siblingId : grandparent.b,
     };
-    return { panes: next, rootId, focusId: firstTerminal(next, siblingId), removed: true };
+    return { panes: next, rootId, focusId: firstLeaf(next, siblingId), removed: true };
   }
-  return { panes: next, rootId: siblingId, focusId: firstTerminal(next, siblingId), removed: true };
+  return { panes: next, rootId: siblingId, focusId: firstLeaf(next, siblingId), removed: true };
 }
 
-/** First terminal reached from `id` (id itself if it's a terminal). */
-function firstTerminal(panes: PaneMap, id: number): number {
+/** First leaf reached from `id` (id itself if it's a leaf). */
+function firstLeaf(panes: PaneMap, id: number): number {
   const p = panes[id];
-  if (!p || p.type === "terminal") return id;
-  return firstTerminal(panes, p.a);
+  if (!p || p.type !== "split") return id;
+  return firstLeaf(panes, p.a);
 }
 
 /** Pane adjacent to `activeId` in layout reading order. */

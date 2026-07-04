@@ -109,8 +109,8 @@ De-risk the unproven path (PTY ↔ Deno ↔ webview streaming) **first**.
 
 ### Phase 4 — Feature surfaces
 - [ ] Prompt stacker (save/search/queue, import/export, tags)
-- [ ] Flip explorer ("spinning door" terminal ↔ file explorer)
-- [ ] File explorer + sandboxed fs ops
+- [x] Flip explorer ("spinning door" terminal ↔ file explorer)
+- [x] File explorer + sandboxed fs ops
 - [ ] Code editor (Canvas2D buffer/tokenizer) — port or reconsider
 - [ ] Infinite diagram canvas (rects, connectors, text, tools)
 - [ ] Settings, shell landing, tab bar, close-confirm dialog

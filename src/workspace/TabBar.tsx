@@ -36,6 +36,7 @@ export default function TabBar(props: { ws: Workspace }) {
       </div>
 
       <div class="pane-actions">
+        <button title="Flip pane (⌘E)" onClick={() => ws.flipActive()}>⇄</button>
         <button title="Split right (⌘D)" onClick={() => ws.splitActive("h")}>⇋</button>
         <button title="Split down (⌘⇧D)" onClick={() => ws.splitActive("v")}>⤢</button>
         <button title="Zoom pane (⌘⏎)" onClick={() => ws.toggleZoom()}>⤡</button>

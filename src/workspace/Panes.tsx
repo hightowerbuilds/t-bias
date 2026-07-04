@@ -1,5 +1,6 @@
 import { createSignal, Match, onCleanup, Show, Switch } from "solid-js";
-import type { SplitPane } from "../pane-tree";
+import ExplorerPane from "../explorer/ExplorerPane";
+import type { ExplorerPane as ExplorerPaneNode, SplitPane, TerminalPane as TerminalPaneNode } from "../pane-tree";
 import type { Tab, Workspace } from "./store";
 import TerminalPane from "./TerminalPane";
 
@@ -27,8 +28,11 @@ function PaneNode(props: { ws: Workspace; tab: Tab; paneId: number }) {
           ws={props.ws}
           paneId={props.paneId}
           tabId={props.tab.id}
-          pane={pane() as never}
+          pane={pane() as TerminalPaneNode}
         />
+      </Match>
+      <Match when={pane()?.type === "explorer"}>
+        <ExplorerPane pane={pane() as ExplorerPaneNode} />
       </Match>
       <Match when={pane()?.type === "split"}>
         <SplitView ws={props.ws} tab={props.tab} split={pane() as SplitPane} />

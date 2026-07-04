@@ -51,6 +51,7 @@ export default function Workspace() {
     const unsub = registerHotkeys({
       "$mod+t": () => ws.addTab(),
       "$mod+w": () => ws.closeActive(),
+      "$mod+e": () => ws.flipActive(),
       "$mod+d": () => ws.splitActive("h"),
       "$mod+Shift+D": () => ws.splitActive("v"),
       "$mod+Enter": () => ws.toggleZoom(),

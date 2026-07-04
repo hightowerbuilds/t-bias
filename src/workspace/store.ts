@@ -3,13 +3,15 @@ import { createStore, produce, type SetStoreFunction } from "solid-js/store";
 import {
   closePane as closePaneTree,
   findAdjacent,
+  leafIds,
   splitPane,
   terminalIds,
+  type ExplorerPane,
   type PaneMap,
   type SplitPane,
   type TerminalPane,
 } from "../pane-tree";
-import { destroyTerminal, focusTerminal, resetTerminalZoom, zoomTerminal } from "../terminal/session";
+import { destroyTerminal, focusTerminal, resetTerminalZoom, unmountTerminal, zoomTerminal } from "../terminal/session";
 
 export interface Tab {
   id: number;
@@ -47,6 +49,7 @@ export interface Workspace {
   handleShellExit: (paneId: number) => void;
   fontZoom: (delta: number) => void;
   fontZoomReset: () => void;
+  flipActive: () => void;
   hydrate: (snapshot: WorkspaceSnapshot) => void;
   snapshot: () => WorkspaceSnapshot;
 }
@@ -129,14 +132,14 @@ export function createWorkspace(): Workspace {
     const tab = activeTab();
     if (i < 0 || !tab) return;
     // Only-pane tab → close the whole tab.
-    if (terminalIds(tab.panes, tab.rootId).length <= 1) {
+    if (leafIds(tab.panes, tab.rootId).length <= 1) {
       removeTab(tab.id);
       return;
     }
     const closing = tab.activePaneId;
     const result = closePaneTree(tab.panes, tab.rootId, closing);
     if (!result.removed) return;
-    destroyTerminal(closing);
+    if (tab.panes[closing]?.type === "terminal") destroyTerminal(closing);
     setTabs(i, produce((t) => {
       t.panes = result.panes;
       t.rootId = result.rootId;
@@ -146,12 +149,31 @@ export function createWorkspace(): Workspace {
     queueMicrotask(() => focusTerminal(result.focusId));
   };
 
+  const flipActive = () => {
+    const i = activeIndex();
+    const tab = activeTab();
+    if (i < 0 || !tab) return;
+    const paneId = tab.activePaneId;
+    const pane = tab.panes[paneId];
+    if (!pane || pane.type === "split") return;
+
+    const cwd = pane.cwd;
+    if (pane.type === "terminal") {
+      // Detach the terminal DOM but keep the session cache alive.
+      unmountTerminal(paneId);
+      setTabs(i, "panes", paneId, { type: "explorer", id: paneId, cwd } as ExplorerPane);
+    } else {
+      setTabs(i, "panes", paneId, { type: "terminal", id: paneId, cwd } as TerminalPane);
+      queueMicrotask(() => focusTerminal(paneId));
+    }
+  };
+
   const handleShellExit = (paneId: number) => {
     // A shell that exited on its own (e.g. `exit`) — collapse its pane.
     const i = tabs.findIndex((t) => t.panes[paneId]?.type === "terminal");
     if (i < 0) return;
     const tab = tabs[i];
-    if (terminalIds(tab.panes, tab.rootId).length <= 1) {
+    if (leafIds(tab.panes, tab.rootId).length <= 1) {
       removeTab(tab.id);
       return;
     }
@@ -250,6 +272,7 @@ export function createWorkspace(): Workspace {
     handleShellExit,
     fontZoom,
     fontZoomReset,
+    flipActive,
     hydrate,
     snapshot,
   };

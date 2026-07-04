@@ -15,6 +15,7 @@ import { appDataDir } from "./db/client.ts";
 import { migrate } from "./db/migrate.ts";
 import { recordShellExit, recordShellSpawn } from "./db/shells.ts";
 import { loadWorkspace, saveWorkspace } from "./db/workspace.ts";
+import { listDirectory, readTextFile } from "./fs/sandbox.ts";
 import { PtyBridge } from "./pty_bridge.ts";
 
 // Startup logging: console + file. Helps debug packaged app launches where stdout
@@ -108,6 +109,28 @@ async function handler(req: Request): Promise<Response> {
     const body = await req.json();
     await saveWorkspace(body);
     return Response.json({ ok: true });
+  }
+
+  if (url.pathname === "/api/fs/list" && req.method === "GET") {
+    const subpath = url.searchParams.get("path") ?? "";
+    try {
+      const entries = await listDirectory(subpath);
+      return Response.json(entries);
+    } catch (e) {
+      const status = e instanceof Error && e.message === "path outside sandbox" ? 403 : 500;
+      return new Response(`fs list failed: ${e}`, { status });
+    }
+  }
+
+  if (url.pathname === "/api/fs/read" && req.method === "GET") {
+    const subpath = url.searchParams.get("path") ?? "";
+    try {
+      const content = await readTextFile(subpath);
+      return Response.json({ content });
+    } catch (e) {
+      const status = e instanceof Error && e.message === "path outside sandbox" ? 403 : 500;
+      return new Response(`fs read failed: ${e}`, { status });
+    }
   }
 
   if (url.pathname === "/ws") {

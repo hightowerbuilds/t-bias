@@ -23,7 +23,7 @@ export function migrate() {
     CREATE TABLE IF NOT EXISTS panes (
       id INTEGER PRIMARY KEY,
       tab_id INTEGER NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('terminal', 'split')),
+      type TEXT NOT NULL CHECK(type IN ('terminal', 'explorer', 'split')),
       parent_id INTEGER,
       dir TEXT CHECK(dir IN ('h', 'v')),
       ratio REAL,

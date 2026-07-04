@@ -25,7 +25,7 @@ export const panes = sqliteTable("panes", {
   tabId: integer("tab_id")
     .notNull()
     .references(() => tabs.id),
-  type: text("type", { enum: ["terminal", "split"] }).notNull(),
+  type: text("type", { enum: ["terminal", "explorer", "split"] }).notNull(),
   parentId: integer("parent_id"),
   dir: text("dir", { enum: ["h", "v"] }),
   ratio: real("ratio"),

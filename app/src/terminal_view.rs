@@ -84,6 +84,7 @@ pub fn terminal_element(
     font_family: SharedString,
     font_size: Pixels,
     theme: Theme,
+    focused: bool,
 ) -> impl IntoElement {
     let base_font = font(font_family);
 
@@ -106,7 +107,9 @@ pub fn terminal_element(
             GridMetrics { cell_w, line_h }
         },
         move |bounds, metrics, window, cx| {
-            paint_grid(&handle, &base_font, font_size, &theme, bounds, &metrics, window, cx);
+            paint_grid(
+                &handle, &base_font, font_size, &theme, focused, bounds, &metrics, window, cx,
+            );
         },
     )
     .size_full()
@@ -118,6 +121,7 @@ fn paint_grid(
     base_font: &Font,
     font_size: Pixels,
     theme: &Theme,
+    focused: bool,
     bounds: Bounds<Pixels>,
     metrics: &GridMetrics,
     window: &mut Window,
@@ -239,15 +243,40 @@ fn paint_grid(
         let _ = shaped.paint(origin, line_h, TextAlign::Left, None, window, cx);
     }
 
-    // Cursor: hollow box for Phase 2 (focused solid block lands with input, P3).
+    // Cursor: focused → solid block with the glyph inverted; unfocused → hollow.
     if cursor.shape != CursorShape::Hidden {
         let line = cursor.point.line.0;
         let col = cursor.point.column.0;
         if line >= 0 && (line as usize) < rows && col < cols {
+            let r = line as usize;
             let x = bounds.origin.x + col * cell_w;
-            let y = bounds.origin.y + (line as usize) * line_h;
-            let b = Bounds::new(point(x, y), size(cell_w, line_h));
-            window.paint_quad(outline(b, theme.cursor, BorderStyle::Solid));
+            let y = bounds.origin.y + r * line_h;
+            let cell_bounds = Bounds::new(point(x, y), size(cell_w, line_h));
+            if focused {
+                window.paint_quad(fill(cell_bounds, theme.cursor));
+                let cell = grid[r][col];
+                if !cell.spacer && cell.ch != ' ' {
+                    let mut buf = [0u8; 4];
+                    let s = cell.ch.encode_utf8(&mut buf);
+                    let run = TextRun {
+                        len: s.len(),
+                        font: base_font.clone(),
+                        color: theme.bg.into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    };
+                    let shaped = text_system.shape_line(
+                        SharedString::from(s.to_string()),
+                        font_size,
+                        &[run],
+                        None,
+                    );
+                    let _ = shaped.paint(point(x, y), line_h, TextAlign::Left, None, window, cx);
+                }
+            } else {
+                window.paint_quad(outline(cell_bounds, theme.cursor, BorderStyle::Solid));
+            }
         }
     }
 }

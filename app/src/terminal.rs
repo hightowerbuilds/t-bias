@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::thread;
 
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use anyhow::Result;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -153,13 +153,8 @@ impl Terminal {
         }
     }
 
-    /// Write raw bytes to the shell.
-    pub fn input(&self, bytes: impl Into<Vec<u8>>) {
-        let _ = self.msg_tx.send(Msg::Input(bytes.into()));
-    }
-
     /// Resize both the emulator grid and the PTY window.
-    #[allow(dead_code)] // exercised once the element computes cols/rows (Phase 2)
+    #[allow(dead_code)] // the element drives resize via TerminalHandle
     pub fn resize(&mut self, size: TerminalSize) {
         if size == self.size {
             return;
@@ -218,6 +213,41 @@ impl TerminalHandle {
     /// The shared terminal, for reading `renderable_content()` while painting.
     pub fn term(&self) -> &Arc<FairMutex<Term<TbiasListener>>> {
         &self.term
+    }
+
+    /// Write raw bytes to the shell.
+    pub fn input(&self, bytes: impl Into<Vec<u8>>) {
+        let _ = self.msg_tx.send(Msg::Input(bytes.into()));
+    }
+
+    /// Terminal is in application-cursor-keys mode (DECCKM) — affects arrow keys.
+    pub fn app_cursor(&self) -> bool {
+        self.term.lock().mode().contains(TermMode::APP_CURSOR)
+    }
+
+    /// Paste text, honoring bracketed-paste mode and normalizing newlines to CR.
+    pub fn paste(&self, text: &str) {
+        let bracketed = self.term.lock().mode().contains(TermMode::BRACKETED_PASTE);
+        let normalized = text.replace("\r\n", "\r").replace('\n', "\r");
+        let mut bytes = Vec::with_capacity(normalized.len() + 12);
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[200~");
+            bytes.extend_from_slice(normalized.as_bytes());
+            bytes.extend_from_slice(b"\x1b[201~");
+        } else {
+            bytes.extend_from_slice(normalized.as_bytes());
+        }
+        let _ = self.msg_tx.send(Msg::Input(bytes));
+    }
+
+    /// Scroll the viewport within the scrollback.
+    pub fn scroll(&self, scroll: Scroll) {
+        self.term.lock().scroll_display(scroll);
+    }
+
+    /// Jump the viewport back to the live prompt (used on keypress).
+    pub fn scroll_to_bottom(&self) {
+        self.term.lock().scroll_display(Scroll::Bottom);
     }
 
     /// Reflow the emulator grid and the PTY to a new cell size. No-op if the

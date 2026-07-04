@@ -1,28 +1,31 @@
 // t-bias — native GPUI shell.
 //
-// Phase 1: a single live terminal. `Root` owns a `Terminal` backend (PTY +
-// alacritty_terminal), drains its event channel on a GPUI task, and repaints on
-// each Wakeup. Rendering is still a naive per-line text dump — the real
-// cell-grid `TerminalElement` (colors, attrs, cursor) lands in Phase 2.
+// A single live terminal: `Root` owns a `Terminal` backend (PTY +
+// alacritty_terminal), drains its event channel on a GPUI task, repaints on each
+// Wakeup, and forwards keyboard/scroll/paste input to the shell. The grid is
+// drawn by the Phase 2 cell element (`terminal_view`).
 
+mod input;
 mod terminal;
 mod terminal_view;
 
-use std::time::Duration;
-
 use alacritty_terminal::event::Event as AlacEvent;
+use alacritty_terminal::grid::Scroll;
 use futures::StreamExt;
 use gpui::{
-    div, prelude::*, px, rgb, size, App, Bounds, Context, Window, WindowBounds, WindowOptions,
+    div, prelude::*, px, rgb, size, App, Bounds, Context, FocusHandle, KeyDownEvent, ScrollDelta,
+    ScrollWheelEvent, Window, WindowBounds, WindowOptions,
 };
 
+use input::{encode_key, KeyMods};
 use terminal::{Terminal, TerminalSize};
 use terminal_view::{terminal_element, Theme};
 
 const FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 14.;
+const LINE_HEIGHT: f32 = 1.3;
 
-/// Initial grid size until the element measures real cell dimensions (Phase 2).
+/// Initial grid size until the element measures real cell dimensions.
 const INITIAL_SIZE: TerminalSize = TerminalSize {
     cols: 100,
     lines: 30,
@@ -30,6 +33,8 @@ const INITIAL_SIZE: TerminalSize = TerminalSize {
 
 struct Root {
     terminal: Option<Terminal>,
+    focus: FocusHandle,
+    focused_once: bool,
 }
 
 impl Root {
@@ -41,7 +46,6 @@ impl Root {
                 cx.spawn(async move |this, cx| {
                     while let Some(first) = events.next().await {
                         let mut exited = is_exit(&first);
-                        // Coalesce everything already queued into this repaint.
                         while let Ok(ev) = events.try_recv() {
                             if is_exit(&ev) {
                                 exited = true;
@@ -64,29 +68,6 @@ impl Root {
                 })
                 .detach();
 
-                // Phase-1 scaffolding: with no keyboard input yet (Phase 3), drive
-                // a couple of commands after startup so each launch visibly streams
-                // live PTY output. Remove once real input lands.
-                cx.spawn(async move |this, cx| {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(500))
-                        .await;
-                    let _ = this.update(cx, |root, _| {
-                        if let Some(t) = root.terminal.as_ref() {
-                            t.input("echo \"t-bias phase 1: PTY + alacritty_terminal live\"\r");
-                        }
-                    });
-                    cx.background_executor()
-                        .timer(Duration::from_millis(300))
-                        .await;
-                    let _ = this.update(cx, |root, _| {
-                        if let Some(t) = root.terminal.as_ref() {
-                            t.input("ls --color=always -1 | head -n 8\r");
-                        }
-                    });
-                })
-                .detach();
-
                 Some(terminal)
             }
             Err(err) => {
@@ -95,7 +76,61 @@ impl Root {
             }
         };
 
-        Self { terminal }
+        Self {
+            terminal,
+            focus: cx.focus_handle(),
+            focused_once: false,
+        }
+    }
+
+    /// Encode a keystroke and send it to the shell (or handle ⌘ shortcuts).
+    fn on_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let Some(term) = self.terminal.as_ref() else {
+            return;
+        };
+        let handle = term.handle();
+        let ks = &event.keystroke;
+        let m = ks.modifiers;
+
+        // ⌘ shortcuts: paste (copy needs a selection — Phase 3b).
+        if m.platform {
+            if ks.key == "v" {
+                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                    handle.scroll_to_bottom();
+                    handle.paste(&text);
+                    cx.notify();
+                }
+            }
+            return;
+        }
+
+        let mods = KeyMods {
+            ctrl: m.control,
+            alt: m.alt,
+            shift: m.shift,
+            cmd: m.platform,
+        };
+        if let Some(bytes) = encode_key(&ks.key, ks.key_char.as_deref(), mods, handle.app_cursor()) {
+            handle.scroll_to_bottom();
+            handle.input(bytes);
+            cx.notify();
+        }
+    }
+
+    /// Scroll the scrollback viewport.
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let Some(term) = self.terminal.as_ref() else {
+            return;
+        };
+        let line_h = FONT_SIZE * LINE_HEIGHT;
+        let lines = match event.delta {
+            ScrollDelta::Lines(p) => p.y as i32,
+            ScrollDelta::Pixels(p) => (f32::from(p.y) / line_h) as i32,
+        };
+        if lines != 0 {
+            term.handle().scroll(Scroll::Delta(lines));
+            cx.notify();
+        }
     }
 }
 
@@ -105,8 +140,20 @@ fn is_exit(event: &AlacEvent) -> bool {
 }
 
 impl Render for Root {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Grab keyboard focus on first paint so typing works immediately.
+        if !self.focused_once {
+            window.focus(&self.focus, cx);
+            self.focused_once = true;
+        }
+        let focused = self.focus.is_focused(window);
+
         let root = div()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _window, cx| this.on_key(ev, cx)))
+            .on_scroll_wheel(
+                cx.listener(|this, ev: &ScrollWheelEvent, _window, cx| this.on_scroll(ev, cx)),
+            )
             .flex()
             .flex_col()
             .size_full()
@@ -114,14 +161,13 @@ impl Render for Root {
             .p_2();
 
         match &self.terminal {
-            Some(term) => root.child(
-                div().flex_1().child(terminal_element(
-                    term.handle(),
-                    FONT_FAMILY.into(),
-                    px(FONT_SIZE),
-                    Theme::default(),
-                )),
-            ),
+            Some(term) => root.child(div().flex_1().child(terminal_element(
+                term.handle(),
+                FONT_FAMILY.into(),
+                px(FONT_SIZE),
+                Theme::default(),
+                focused,
+            ))),
             None => root.text_color(rgb(0xff7b72)).child(
                 div()
                     .font_family(FONT_FAMILY)

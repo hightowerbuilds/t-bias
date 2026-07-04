@@ -159,22 +159,43 @@ boilerplate, which is exactly what a grid needs. All in `app/src/terminal_view.r
 
 ## Phase 3 — Input (keyboard, mouse, clipboard)
 
-- [ ] Focus handling: element is focusable; track focused pane.
-- [ ] Key events → bytes: printable chars, Enter, Backspace, Tab, Esc.
-- [ ] Control/Alt/modifier encoding (Ctrl-C, Ctrl-D, Ctrl-Z, Alt-sequences).
-- [ ] Arrow/Home/End/PageUp/Down/Delete/Insert/Function keys (application vs normal mode).
-- [ ] Respect terminal modes (application cursor keys, bracketed paste).
-- [ ] Bracketed paste: wrap pasted text in `\e[200~ … \e[201~`.
-- [ ] Mouse: click to focus, click-drag selection, cell hit-testing.
-- [ ] Selection model: start/extend/word/line select; render selection highlight.
-- [ ] Copy selection → system clipboard (gpui clipboard API).
-- [ ] Paste from clipboard → PTY (with bracketed-paste if enabled).
-- [ ] Mouse reporting mode passthrough (so TUIs get mouse events when they ask).
-- [ ] Scroll: wheel scrolls scrollback (viewport), not the shell, in normal mode.
+### 3a — Keyboard, scroll, paste, focus — DONE (commit `feat(gpui-3a)`)
+
+Key encoding is a pure, unit-tested function in `app/src/input.rs` (`encode_key`) so the fiddly
+control-code / CSI / app-cursor / modifier logic is pinned by tests, not eyeballed.
+
+- [x] Focus: `Root` holds a `FocusHandle`; container div `.track_focus()` + focused on first
+      paint (`window.focus`). Focused state flows to the element (solid cursor when focused).
+- [x] Key events → bytes: printable (via `key_char`), Enter (`\r`), Backspace (`0x7f`), Tab
+      (`\t` / back-tab `ESC[Z`), Esc.
+- [x] Control/Alt/modifier encoding: Ctrl-<letter> → 0x01-0x1a (+ symbol controls, Ctrl-Space =
+      NUL), Alt → ESC-prefix.
+- [x] Arrows/Home/End/PageUp-Down/Delete/Insert/F1-F12; application-cursor mode swaps `ESC[` for
+      `ESC O`; a held modifier forces the CSI form with the `1;{mod}` parameter.
+- [x] Respect terminal modes: `TermMode::APP_CURSOR` for arrows, `BRACKETED_PASTE` for paste.
+- [x] Bracketed paste: ⌘V reads the clipboard, normalizes newlines→CR, wraps in
+      `ESC[200~ … ESC[201~` when the app enabled it.
+- [x] Scroll: wheel → `term.scroll_display(Scroll::Delta)`; keypress jumps back to the live
+      prompt (`Scroll::Bottom`).
+- [x] Focused cursor: solid block with the glyph redrawn in bg (inverted); hollow when unfocused.
+- [x] Removed the hardcoded startup demo commands — the app now opens to a live, typeable prompt.
+- [x] **VERIFY:** `encode_key` unit tests (7, all pass) cover printable/Ctrl/Alt/arrows-app-vs-
+      normal/edit+function/⌘-not-sent. End-to-end wiring verified by synthesizing keystrokes
+      through the real `on_key` path (keystroke → encode → PTY → shell): typed
+      `echo INPUT_OK && ls | head -3`, shell executed it, output landed in the grid. (Physical
+      key delivery is gpui's `on_key_down`; can't drive it headlessly, but the encode+plumbing
+      path is proven.)
+
+### 3b — Mouse selection + copy (remaining)
+
+- [ ] Mouse: click to focus/position, click-drag selection, cell hit-testing (needs the last
+      painted grid metrics: bounds origin + cell size — stash them for the mouse handler).
+- [ ] Selection model: start/extend/word/line select (alacritty `Selection`); render highlight.
+- [ ] Copy selection → clipboard (⌘C) via `term.selection_to_string()`.
+- [ ] Mouse reporting passthrough (send mouse events to TUIs that request `MOUSE_MODE`/`SGR_MOUSE`).
 - [ ] IME / dead keys / composition input.
-- [ ] **VERIFY:** Claude Code, vim, tmux, less, a mouse-driven TUI all usable; copy/paste
-      works; IME (if applicable) composes. ✅
-- [ ] Commit: `feat(gpui-3): terminal input, selection, clipboard`.
+- [ ] **VERIFY:** vim, tmux, less, a mouse-driven TUI usable; copy/paste works; IME composes. ✅
+- [ ] Commit: `feat(gpui-3b): mouse selection + clipboard copy`.
 
 ## Phase 4 — Workspace shell (tabs, splits, zoom)
 

@@ -1,0 +1,28 @@
+[package]
+name = "t-bias"
+version = "0.1.0"
+edition = "2021"
+description = "t-bias — a native GPU-accelerated terminal (GPUI + alacritty_terminal)"
+
+[[bin]]
+name = "t-bias"
+path = "src/main.rs"
+
+[dependencies]
+# GPUI is not on crates.io — pull from the Zed repo, pinned to a fixed rev.
+# gpui_platform supplies the per-OS Platform impl (Application::new() doesn't
+# exist on its own at this rev; the caller must construct a platform).
+# runtime_shaders: stitch + compile Metal shaders at runtime via the Metal
+# framework instead of shelling out to `xcrun metal` at build time — avoids
+# requiring full Xcode.app (Command Line Tools alone is enough).
+gpui = { git = "https://github.com/zed-industries/zed", rev = "1a99eba1926a2776cfb39be3dca922cf08483af7" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "1a99eba1926a2776cfb39be3dca922cf08483af7", features = [
+    "runtime_shaders",
+] }
+
+# Terminal engine + shell (added for real in Phase 1; declared now so the tree resolves).
+alacritty_terminal = "0.26"
+portable-pty = "0.8"
+
+anyhow = "1"
+log = "0.4"

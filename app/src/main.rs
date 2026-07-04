@@ -17,8 +17,8 @@ use alacritty_terminal::event::Event as AlacEvent;
 use alacritty_terminal::grid::Scroll;
 use futures::StreamExt;
 use gpui::{
-    div, prelude::*, px, rgb, size, App, Bounds, Context, FocusHandle, KeyDownEvent, ScrollDelta,
-    ScrollWheelEvent, Window, WindowBounds, WindowOptions,
+    div, prelude::*, px, rgb, size, App, Application, Bounds, Context, FocusHandle, KeyDownEvent,
+    ScrollDelta, ScrollWheelEvent, Window, WindowBounds, WindowOptions,
 };
 
 use input::{encode_key, KeyMods};
@@ -140,7 +140,7 @@ impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Grab keyboard focus on first paint so typing works immediately.
         if !self.focused_once {
-            window.focus(&self.focus, cx);
+            window.focus(&self.focus);
             self.focused_once = true;
         }
         let focused = self.focus.is_focused(window);
@@ -175,7 +175,7 @@ impl Render for Root {
 }
 
 fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
+    Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
         cx.open_window(
             WindowOptions {

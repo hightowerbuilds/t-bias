@@ -10,8 +10,8 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, CursorShape, NamedColor};
 use gpui::{
     canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Font, FontStyle,
-    FontWeight, IntoElement, Pixels, Rgba, SharedString, Styled, StrikethroughStyle, TextAlign,
-    TextRun, UnderlineStyle, Window,
+    FontWeight, IntoElement, Pixels, Rgba, SharedString, Styled, StrikethroughStyle, TextRun,
+    UnderlineStyle, Window,
 };
 
 use crate::terminal::{TerminalHandle, TerminalSize};
@@ -240,7 +240,7 @@ fn paint_grid(
         }
         let shaped = text_system.shape_line(SharedString::from(text), font_size, &runs, None);
         let origin = point(bounds.origin.x, bounds.origin.y + r * line_h);
-        let _ = shaped.paint(origin, line_h, TextAlign::Left, None, window, cx);
+        let _ = shaped.paint(origin, line_h, window, cx);
     }
 
     // Cursor: focused → solid block with the glyph inverted; unfocused → hollow.
@@ -272,7 +272,7 @@ fn paint_grid(
                         &[run],
                         None,
                     );
-                    let _ = shaped.paint(point(x, y), line_h, TextAlign::Left, None, window, cx);
+                    let _ = shaped.paint(point(x, y), line_h, window, cx);
                 }
             } else {
                 window.paint_quad(outline(cell_bounds, theme.cursor, BorderStyle::Solid));

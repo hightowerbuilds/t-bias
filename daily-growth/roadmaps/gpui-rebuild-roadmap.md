@@ -14,7 +14,15 @@ that. Proven: Zed's built-in terminal is GPUI + `alacritty_terminal`.
 
 ## Locked stack (decisions)
 
-- [ ] **UI framework:** GPUI — git dependency on `zed-industries/zed` (not on crates.io yet).
+> **CRITICAL (2026-07-04):** Use the **published `gpui = "=0.2.2"` from crates.io with the
+> `macos-blade` feature** — NOT the git dep and NOT the default Metal backend. The Metal backend
+> (`gpui_macos`) renders only solid quads on this Intel/AMD dual-GPU Mac (macOS Tahoe 26) —
+> **all glyphs are invisible**. The Blade renderer (wgpu/naga) renders text correctly AND needs
+> no Xcode/`xcrun metal` (naga compiles shaders). Entry point is `gpui::Application::new()`.
+> Diagnosed by comparing against the user's working repo `hightowerbuilds/llnzy`.
+
+- [ ] ~~**UI framework:** GPUI — git dependency on `zed-industries/zed`.~~ → **`gpui = "=0.2.2"`
+      (crates.io) + `features = ["macos-blade"]`.** See critical note above.
 - [ ] **UI component library:** `gpui-component` (longbridge) for chrome (tabs, resizable
       panels, buttons, lists, scrollbars). Terminal grid is hand-written (must be).
 - [ ] **Terminal backend:** `alacritty_terminal = "0.26"` (off Zed's internal fork).

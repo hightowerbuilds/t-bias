@@ -9,16 +9,12 @@ name = "t-bias"
 path = "src/main.rs"
 
 [dependencies]
-# GPUI is not on crates.io — pull from the Zed repo, pinned to a fixed rev.
-# gpui_platform supplies the per-OS Platform impl (Application::new() doesn't
-# exist on its own at this rev; the caller must construct a platform).
-# runtime_shaders: stitch + compile Metal shaders at runtime via the Metal
-# framework instead of shelling out to `xcrun metal` at build time — avoids
-# requiring full Xcode.app (Command Line Tools alone is enough).
-gpui = { git = "https://github.com/zed-industries/zed", rev = "1a99eba1926a2776cfb39be3dca922cf08483af7" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "1a99eba1926a2776cfb39be3dca922cf08483af7", features = [
-    "runtime_shaders",
-] }
+# Published GPUI from crates.io with the BLADE renderer (macos-blade), not the
+# default Metal backend. Blade (wgpu/naga) renders glyphs correctly on this
+# Intel/AMD Mac — the Metal backend (gpui_macos) renders only solid quads here,
+# leaving all text invisible. Blade also compiles shaders via naga, so no Xcode /
+# `xcrun metal` is needed. (Confirmed against a working setup: hightowerbuilds/llnzy.)
+gpui = { version = "=0.2.2", features = ["macos-blade"] }
 
 # Terminal engine + shell (added for real in Phase 1; declared now so the tree resolves).
 alacritty_terminal = "0.26"

@@ -224,19 +224,31 @@ control-code / CSI / app-cursor / modifier logic is pinned by tests, not eyeball
       navigate with keyboard, close panes — all stable; background shells stay alive. ✅
 - [ ] Commit: `feat(gpui-4): tabs, splits, zoom`.
 
-## Phase 5 — Persistence (SQLite)
+## Phase 5 — Persistence (SQLite) — DB layer DONE (headless)
 
-- [ ] Choose app-data dir (`~/Library/Application Support/com.tbias.app`).
-- [ ] `db` module: open `rusqlite` connection (bundled), create dir if missing.
-- [ ] Migrations: `workspaces`, `tabs`, `panes` (self-ref tree), `shells` tables.
-- [ ] Serialize workspace snapshot → rows (recompute pane `parent_id` from tree).
-- [ ] Deserialize rows → workspace state (find root = pane with no parent).
-- [ ] Save: debounced autosave on layout change + save on quit (window close event).
-- [ ] Load/hydrate on startup; fall back to a fresh single-tab workspace.
-- [ ] Shell records: insert on spawn (pid/command/cwd), update on exit (status/code).
-- [ ] Track per-pane cwd (OSC 7 / process cwd) for restore + titles.
-- [ ] **VERIFY:** lay out tabs/splits, quit, relaunch → layout restored; shell history in DB. ✅
-- [ ] Commit: `feat(gpui-5): SQLite persistence`.
+DB layer built + unit-tested in `app/src/db.rs` while Xcode downloaded. The app-side wiring
+(autosave/load/quit hooks) is deferred to when the Phase 4 workspace UI exists (needs rendering).
+
+- [x] App-data dir `~/Library/Application Support/com.tbias.app` (`default_db_path`, creates dir).
+- [x] `db` module: `rusqlite` bundled (SQLite compiled from source via CLT's C toolchain);
+      `open(path)` / `open_in_memory()` + `migrate`.
+- [x] Migrations: `workspaces`, `tabs`, `panes`, `shells`. Pane tree stored via split `a`/`b`
+      pointers; `panes` PK is `(workspace_id, tab_id, id)` so each tab's tree owns its id space.
+- [x] Serialize: `save_workspace` (one transaction, wholesale tabs/panes rewrite) — recomputes
+      each pane's `parent_id` from the tree shape (root → NULL).
+- [x] Deserialize: `load_workspace` — rebuilds each `PaneTree` via `from_parts`; root = the pane
+      with no parent (falls back to the tab's active pane).
+- [ ] Save: debounced autosave on layout change + save on quit — **deferred** (needs workspace UI).
+- [ ] Load/hydrate on startup; fall back to a fresh single-tab workspace — **deferred** (UI).
+- [x] Shell records: `insert_shell` (pane/pid/command/cwd, status 'running'), `mark_shell_exited`
+      (status/exit ts), `list_shells`. (Wiring into `Terminal` spawn/exit is a small follow-up.)
+- [ ] Track per-pane cwd (OSC 7 / process cwd) for restore + titles — deferred.
+- [~] **VERIFY:** headless round-trip tests (5) pass: empty→None, full workspace round-trips
+      byte-for-byte (tabs, split with ratio 0.75, cwd, zoom, active pane, next-id allocators),
+      idempotent replace (shrinking workspace drops old rows), split tree shape survives, shell
+      insert→exit. The real "quit → relaunch → layout restored" check happens once the UI wires
+      in (post-render-fix).
+- [x] Commit: `feat(gpui-5): SQLite persistence layer` (DB + tests; UI wiring later).
 
 ## Phase 6 — File explorer + flip explorer
 

@@ -78,7 +78,7 @@ const RATIO_MIN: f32 = 0.1;
 const RATIO_MAX: f32 = 0.9;
 
 /// A tab's pane layout: the pane map, the root id, and an id allocator.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PaneTree {
     panes: HashMap<PaneId, Pane>,
     root: PaneId,
@@ -104,8 +104,30 @@ impl PaneTree {
         }
     }
 
+    /// Reconstruct a tree from persisted parts (used by the DB layer). `next_id`
+    /// is the allocator high-water mark so restored ids never collide.
+    pub fn from_parts(panes: HashMap<PaneId, Pane>, root: PaneId, next_id: PaneId) -> Self {
+        Self {
+            panes,
+            root,
+            next_id,
+        }
+    }
+
     pub fn root(&self) -> PaneId {
         self.root
+    }
+
+    /// The next id the allocator will hand out (persisted so restores continue
+    /// the sequence).
+    pub fn next_id(&self) -> PaneId {
+        self.next_id
+    }
+
+    /// All (id, pane) entries — order is unspecified (HashMap). Used for
+    /// serialization; the tree shape is recovered from split `a`/`b` pointers.
+    pub fn entries(&self) -> impl Iterator<Item = (PaneId, &Pane)> {
+        self.panes.iter().map(|(id, pane)| (*id, pane))
     }
 
     pub fn get(&self, id: PaneId) -> Option<&Pane> {

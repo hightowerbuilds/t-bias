@@ -5317,6 +5317,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gpui",
+ "libc",
  "log",
  "portable-pty",
  "rusqlite",

@@ -258,7 +258,10 @@ DB layer built + unit-tested in `app/src/db.rs` while Xcode downloaded. The app-
 - [ ] Load/hydrate on startup; fall back to a fresh single-tab workspace — **deferred** (UI).
 - [x] Shell records: `insert_shell` (pane/pid/command/cwd, status 'running'), `mark_shell_exited`
       (status/exit ts), `list_shells`. (Wiring into `Terminal` spawn/exit is a small follow-up.)
-- [ ] Track per-pane cwd (OSC 7 / process cwd) for restore + titles — deferred.
+- [x] Track shell cwd: `Terminal::cwd()` via macOS `proc_pidinfo(PROC_PIDVNODEPATHINFO)` on the
+      shell pid (captured at spawn). OSC 7 isn't an option — alacritty_terminal/vte don't parse
+      it. Used by the explorer to follow `cd`; also available for future titles/restore. (libc
+      dep added; `vip_path` is `[[c_char;32];32]`.)
 - [~] **VERIFY:** headless round-trip tests (5) pass: empty→None, full workspace round-trips
       byte-for-byte (tabs, split with ratio 0.75, cwd, zoom, active pane, next-id allocators),
       idempotent replace (shrinking workspace drops old rows), split tree shape survives, shell
@@ -278,6 +281,10 @@ DB layer built + unit-tested in `app/src/db.rs` while Xcode downloaded. The app-
 - [x] Type styling: `ls -F`-style — dirs blue with `/`, symlinks cyan with `@`, files default.
       (Emoji icons skipped — uncertain color-font support; text markers are crisp + safe.)
 - [x] Navigate into dirs (click), up-navigation (`..`). Keyboard nav = future.
+- [x] **Follows the repo the terminal is in:** on flip-to-explorer, `Explorer::follow(cwd)`
+      re-roots at the git repo containing the shell's cwd (nearest `.git`, else the cwd itself)
+      and opens at the current subdir — so `cd` around, flip, and you land where the shell is;
+      `..` browses up to the repo root but no further. `repo_location` unit-tested.
 - [x] Flip explorer: **⌘E** (and a `⇋` toolbar button) flips the pane terminal ↔ explorer with a
       horizontal card-flip squish (`with`-timer animation, face swaps at t=0.5, terminal frozen
       from PTY-resize mid-flip via a `frozen` flag on `terminal_element`).

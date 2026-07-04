@@ -118,7 +118,11 @@ impl Root {
             Face::Explorer => Face::Terminal,
         };
         if to == Face::Explorer {
-            self.explorer.refresh();
+            // Follow the terminal: re-root at the repo the shell is currently in.
+            match self.terminal.as_ref().and_then(|t| t.cwd()) {
+                Some(cwd) => self.explorer.follow(&cwd),
+                None => self.explorer.refresh(),
+            }
         }
         self.flip = Some(Flip { to, t: 0.0 });
 

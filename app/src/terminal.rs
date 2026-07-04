@@ -9,6 +9,7 @@
 // The GPUI side (see `main.rs`) drains the event channel and calls `cx.notify()`.
 
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -74,6 +75,8 @@ pub enum Msg {
 pub struct Terminal {
     term: Arc<FairMutex<Term<TbiasListener>>>,
     msg_tx: Sender<Msg>,
+    /// The shell's pid, for querying its live working directory.
+    shell_pid: Option<i32>,
 }
 
 impl Terminal {
@@ -107,6 +110,7 @@ impl Terminal {
         }
 
         let child = pair.slave.spawn_command(cmd)?;
+        let shell_pid = child.process_id().map(|p| p as i32);
         // Drop the slave so the master read returns EOF when the child exits.
         drop(pair.slave);
 
@@ -130,7 +134,20 @@ impl Terminal {
             .spawn(move || pty_message_loop(msg_rx, writer, master, child))
             .expect("spawn pty writer");
 
-        Ok((Self { term, msg_tx }, event_rx))
+        Ok((
+            Self {
+                term,
+                msg_tx,
+                shell_pid,
+            },
+            event_rx,
+        ))
+    }
+
+    /// The shell's current working directory (macOS: via `proc_pidinfo`).
+    /// Follows `cd` — the explorer uses this to track "where the terminal is".
+    pub fn cwd(&self) -> Option<PathBuf> {
+        self.shell_pid.and_then(pid_cwd)
     }
 
     /// A cheap, cloneable handle the renderer uses to read the grid and push
@@ -272,4 +289,46 @@ fn pty_message_loop(
 /// The user's preferred shell, falling back to a sane default.
 fn user_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+}
+
+/// A process's current working directory on macOS, via `proc_pidinfo`
+/// (`PROC_PIDVNODEPATHINFO`). Returns None if the process is gone or the call
+/// fails.
+#[cfg(target_os = "macos")]
+fn pid_cwd(pid: i32) -> Option<PathBuf> {
+    // SAFETY: `info` is zero-initialized POD; we pass its exact size and only
+    // read `vip_path` up to its first NUL after a successful call.
+    unsafe {
+        let mut info: libc::proc_vnodepathinfo = std::mem::zeroed();
+        let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+        let ret = libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        );
+        if ret < size {
+            return None;
+        }
+        // libc types `vip_path` as `[[c_char; 32]; 32]` (a 1024-byte NUL-
+        // terminated buffer); flatten and read up to the NUL.
+        let flat: Vec<u8> = info
+            .pvi_cdir
+            .vip_path
+            .iter()
+            .flatten()
+            .map(|&c| c as u8)
+            .collect();
+        let len = flat.iter().position(|&b| b == 0).unwrap_or(flat.len());
+        if len == 0 {
+            return None;
+        }
+        Some(PathBuf::from(String::from_utf8_lossy(&flat[..len]).into_owned()))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pid_cwd(_pid: i32) -> Option<PathBuf> {
+    None
 }

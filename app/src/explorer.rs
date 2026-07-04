@@ -5,6 +5,8 @@
 // where it has access to the view's click listeners. All access goes through
 // `fs::Sandbox`, so browsing can never escape the repo root.
 
+use std::path::{Path, PathBuf};
+
 use crate::fs::{DirEntry, Sandbox};
 
 /// Explorer navigation state: a directory listing rooted at the repo.
@@ -28,6 +30,23 @@ impl Explorer {
         };
         explorer.refresh();
         explorer
+    }
+
+    /// Re-root the explorer to follow the terminal: anchor the sandbox at the
+    /// git repo containing `cwd` (or `cwd` itself if not in a repo) and open at
+    /// the terminal's current subdirectory within it. So `cd`-ing around the
+    /// repo, then flipping, lands you exactly where the shell is — and `..` can
+    /// browse up to the repo root but no further.
+    pub fn follow(&mut self, cwd: &Path) {
+        let (root, rel) = repo_location(cwd);
+        self.sandbox = Sandbox::new(root);
+        self.rel = rel;
+        self.refresh();
+        // If the subdir can't be read for any reason, fall back to the root.
+        if self.error.is_some() && !self.rel.is_empty() {
+            self.rel.clear();
+            self.refresh();
+        }
     }
 
     /// Re-read the current directory.
@@ -95,5 +114,64 @@ impl Explorer {
 impl Default for Explorer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Resolve `cwd` to (repo root, path-relative-to-root). The repo root is the
+/// nearest ancestor containing `.git`; if there is none, the root is `cwd`
+/// itself (rel = "").
+fn repo_location(cwd: &Path) -> (PathBuf, String) {
+    let root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let rel = cwd
+        .strip_prefix(&root)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    (root, rel)
+}
+
+/// Nearest ancestor of `start` (inclusive) that contains a `.git` entry.
+fn find_repo_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = Some(start);
+    while let Some(d) = dir {
+        if d.join(".git").exists() {
+            return Some(d.to_path_buf());
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_location_finds_git_root_and_rel() {
+        // Build a temp repo: <tmp>/repo/.git and <tmp>/repo/a/b.
+        let base =
+            std::env::temp_dir().join(format!("tbias-explorer-{}", std::process::id()));
+        let repo = base.join("repo");
+        let deep = repo.join("a/b");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(&deep).unwrap();
+
+        let (root, rel) = repo_location(&deep);
+        assert_eq!(root, repo);
+        assert_eq!(rel, "a/b");
+
+        // At the repo root, rel is empty.
+        let (root2, rel2) = repo_location(&repo);
+        assert_eq!(root2, repo);
+        assert_eq!(rel2, "");
+
+        // Outside any repo: root = the dir itself.
+        let no_repo = base.join("loose");
+        std::fs::create_dir_all(&no_repo).unwrap();
+        let (root3, rel3) = repo_location(&no_repo);
+        assert_eq!(root3, no_repo);
+        assert_eq!(rel3, "");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

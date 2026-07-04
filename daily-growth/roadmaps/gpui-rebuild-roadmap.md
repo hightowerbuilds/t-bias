@@ -272,13 +272,19 @@ DB layer built + unit-tested in `app/src/db.rs` while Xcode downloaded. The app-
       can never traverse out of the root — the security-critical part), `list_dir` (dirs-first,
       case-insensitive), `read_text`, symlink-aware entry kinds. Ported from `fs/sandbox.ts`.
       4 tests incl. traversal-cannot-read-outside-root. (UI below is blocked on the render fix.)
-- [ ] Explorer pane UI: header (path, up button) + scrollable entry list (gpui-component list).
-- [ ] Icons per type (dir/file/symlink/markdown).
-- [ ] Navigate into dirs; up-navigation; keyboard nav (optional).
-- [ ] Flip explorer: toggle a leaf between terminal ↔ explorer in place (keep session cached).
-- [ ] Open file behavior: `.md` → Phase 7 preview; others → (future editor or ignore).
-- [ ] **VERIFY:** browse dirs, flip a terminal to explorer and back, open a file. ✅
-- [ ] Commit: `feat(gpui-6): file explorer + flip`.
+- [x] Explorer pane UI → `app/src/explorer.rs` (state) + `Root::render_explorer` in `main.rs`:
+      header (repo path + `..` up button) + scrollable entry list. Read-only, rooted at the repo
+      (cwd), all access via the `fs::Sandbox` guard. Plain GPUI div tree (not a canvas).
+- [x] Type styling: `ls -F`-style — dirs blue with `/`, symlinks cyan with `@`, files default.
+      (Emoji icons skipped — uncertain color-font support; text markers are crisp + safe.)
+- [x] Navigate into dirs (click), up-navigation (`..`). Keyboard nav = future.
+- [x] Flip explorer: **⌘E** (and a `⇋` toolbar button) flips the pane terminal ↔ explorer with a
+      horizontal card-flip squish (`with`-timer animation, face swaps at t=0.5, terminal frozen
+      from PTY-resize mid-flip via a `frozen` flag on `terminal_element`).
+- [ ] Open file behavior: `.md` → Phase 7 preview; others → ignore. (Files are no-op for now.)
+- [x] **VERIFY:** ✅ on-screen — flip animates, explorer shows the repo, folder/`..` navigation
+      works, flips back to a live terminal. (First feature verified visually post-Blade-fix.)
+- [x] Commit: `feat(gpui-6): file explorer + flip`.
 
 ## Phase 7 — Markdown preview (port the feature we just built)
 

@@ -6,6 +6,7 @@
 // drawn by the Phase 2 cell element (`terminal_view`).
 
 mod db;
+mod explorer;
 mod fs;
 mod input;
 mod pane_tree;
@@ -13,14 +14,18 @@ mod terminal;
 mod terminal_view;
 mod workspace;
 
+use std::time::Duration;
+
 use alacritty_terminal::event::Event as AlacEvent;
 use alacritty_terminal::grid::Scroll;
+use fs::EntryKind;
 use futures::StreamExt;
 use gpui::{
-    div, prelude::*, px, rgb, size, App, Application, Bounds, Context, FocusHandle, KeyDownEvent,
-    ScrollDelta, ScrollWheelEvent, Window, WindowBounds, WindowOptions,
+    div, prelude::*, px, relative, rgb, size, AnyElement, App, Application, Bounds, Context,
+    FocusHandle, KeyDownEvent, ScrollDelta, ScrollWheelEvent, Window, WindowBounds, WindowOptions,
 };
 
+use explorer::Explorer;
 use input::{encode_key, KeyMods};
 use terminal::{Terminal, TerminalSize};
 use terminal_view::{terminal_element, Theme};
@@ -29,14 +34,34 @@ const FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 14.;
 const LINE_HEIGHT: f32 = 1.3;
 
+/// Flip animation: total duration and step count (frames).
+const FLIP_STEPS: u32 = 14;
+const FLIP_STEP_MS: u64 = 16;
+
 /// Initial grid size until the element measures real cell dimensions.
 const INITIAL_SIZE: TerminalSize = TerminalSize {
     cols: 100,
     lines: 30,
 };
 
+/// Which face of the pane is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Face {
+    Terminal,
+    Explorer,
+}
+
+/// An in-progress flip: `t` runs 0→1; the face swaps at the midpoint.
+struct Flip {
+    to: Face,
+    t: f32,
+}
+
 struct Root {
     terminal: Option<Terminal>,
+    explorer: Explorer,
+    face: Face,
+    flip: Option<Flip>,
     focus: FocusHandle,
     focused_once: bool,
 }
@@ -75,19 +100,76 @@ impl Root {
 
         Self {
             terminal,
+            explorer: Explorer::new(),
+            face: Face::Terminal,
+            flip: None,
             focus: cx.focus_handle(),
             focused_once: false,
         }
     }
 
+    /// Start flipping to the other face (ignored if a flip is in progress).
+    fn toggle_flip(&mut self, cx: &mut Context<Self>) {
+        if self.flip.is_some() {
+            return;
+        }
+        let to = match self.face {
+            Face::Terminal => Face::Explorer,
+            Face::Explorer => Face::Terminal,
+        };
+        if to == Face::Explorer {
+            self.explorer.refresh();
+        }
+        self.flip = Some(Flip { to, t: 0.0 });
+
+        // Drive the animation off a timer, swapping the live face at the midpoint.
+        cx.spawn(async move |this, cx| {
+            for i in 1..=FLIP_STEPS {
+                cx.background_executor()
+                    .timer(Duration::from_millis(FLIP_STEP_MS))
+                    .await;
+                let t = i as f32 / FLIP_STEPS as f32;
+                let alive = this
+                    .update(cx, |root, cx| {
+                        if let Some(flip) = root.flip.as_mut() {
+                            flip.t = t;
+                            if t >= 0.5 {
+                                root.face = flip.to;
+                            }
+                        }
+                        cx.notify();
+                    })
+                    .is_ok();
+                if !alive {
+                    return;
+                }
+            }
+            let _ = this.update(cx, |root, cx| {
+                root.flip = None;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Encode a keystroke and send it to the shell (or handle ⌘ shortcuts).
     fn on_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let ks = &event.keystroke;
+        let m = ks.modifiers;
+
+        // ⌘E flips the pane regardless of which face is showing.
+        if m.platform && ks.key == "e" {
+            self.toggle_flip(cx);
+            return;
+        }
+        // The explorer is browsed with the mouse; no PTY input while it shows.
+        if self.face != Face::Terminal {
+            return;
+        }
         let Some(term) = self.terminal.as_ref() else {
             return;
         };
         let handle = term.handle();
-        let ks = &event.keystroke;
-        let m = ks.modifiers;
 
         // ⌘ shortcuts: paste (copy needs a selection — Phase 3b).
         if m.platform {
@@ -114,8 +196,11 @@ impl Root {
         }
     }
 
-    /// Scroll the scrollback viewport.
+    /// Scroll the scrollback viewport (terminal face only).
     fn on_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        if self.face != Face::Terminal {
+            return;
+        }
         let Some(term) = self.terminal.as_ref() else {
             return;
         };
@@ -128,6 +213,82 @@ impl Root {
             term.handle().scroll(Scroll::Delta(lines));
             cx.notify();
         }
+    }
+
+    /// Build the read-only explorer face (header + entry list).
+    fn render_explorer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let at_root = self.explorer.at_root();
+        let up = div()
+            .id("explorer-up")
+            .px_2()
+            .rounded_md()
+            .text_color(if at_root { rgb(0x484f58) } else { rgb(0x58a6ff) })
+            .when(!at_root, |el| el.hover(|s| s.bg(rgb(0x21262d))))
+            .child("..")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.explorer.up();
+                cx.notify();
+            }));
+
+        let header = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .bg(rgb(0x161b22))
+            .text_color(rgb(0x8b949e))
+            .child(up)
+            .child(self.explorer.display_path());
+
+        let mut list = div()
+            .id("explorer-list")
+            .flex_1()
+            .flex()
+            .flex_col()
+            .overflow_y_scroll()
+            .py_1();
+
+        if let Some(err) = self.explorer.error() {
+            list = list.child(
+                div()
+                    .px_2()
+                    .text_color(rgb(0xff7b72))
+                    .child(format!("cannot read directory: {err}")),
+            );
+        }
+        for (i, entry) in self.explorer.entries().iter().enumerate() {
+            let (label, color) = match entry.kind {
+                EntryKind::Directory => (format!("{}/", entry.name), rgb(0x58a6ff)),
+                EntryKind::Symlink => (format!("{}@", entry.name), rgb(0x39c5cf)),
+                EntryKind::File => (entry.name.clone(), rgb(0xe6edf3)),
+            };
+            let mut row = div()
+                .id(("entry", i))
+                .px_2()
+                .text_color(color)
+                .hover(|s| s.bg(rgb(0x1f2630)))
+                .child(label);
+            if entry.kind == EntryKind::Directory {
+                let name = entry.name.clone();
+                row = row.on_click(cx.listener(move |this, _, _, cx| {
+                    this.explorer.enter(&name);
+                    cx.notify();
+                }));
+            }
+            list = list.child(row);
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .font_family(FONT_FAMILY)
+            .text_size(px(FONT_SIZE))
+            .child(header)
+            .child(list)
+            .into_any_element()
     }
 }
 
@@ -144,8 +305,70 @@ impl Render for Root {
             self.focused_once = true;
         }
         let focused = self.focus.is_focused(window);
+        let flipping = self.flip.is_some();
+        // Horizontal squish: full at t=0/1, edge-on at t=0.5.
+        let scale = self
+            .flip
+            .as_ref()
+            .map(|f| (1.0 - 2.0 * f.t).abs().max(0.02))
+            .unwrap_or(1.0);
 
-        let root = div()
+        // The current face's content (the animation swaps `self.face` at t=0.5).
+        let face_el: AnyElement = match self.face {
+            Face::Terminal => match &self.terminal {
+                Some(term) => terminal_element(
+                    term.handle(),
+                    FONT_FAMILY.into(),
+                    px(FONT_SIZE),
+                    Theme::default(),
+                    focused,
+                    flipping,
+                )
+                .into_any_element(),
+                None => div()
+                    .font_family(FONT_FAMILY)
+                    .text_color(rgb(0xff7b72))
+                    .child("failed to start terminal — see logs")
+                    .into_any_element(),
+            },
+            Face::Explorer => self.render_explorer(cx),
+        };
+
+        // Toolbar: the flip button (also ⌘E).
+        let flip_label = match self.face {
+            Face::Terminal => "⇋  files  (⌘E)",
+            Face::Explorer => "⇋  terminal  (⌘E)",
+        };
+        let toolbar = div()
+            .flex()
+            .flex_none()
+            .justify_end()
+            .items_center()
+            .px_2()
+            .py_1()
+            .child(
+                div()
+                    .id("flip-btn")
+                    .px_2()
+                    .rounded_md()
+                    .bg(rgb(0x21262d))
+                    .text_color(rgb(0xc9d1d9))
+                    .font_family(FONT_FAMILY)
+                    .text_size(px(12.))
+                    .hover(|s| s.bg(rgb(0x30363d)))
+                    .child(flip_label)
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_flip(cx))),
+            );
+
+        // The pane, squished horizontally during a flip.
+        let pane = div()
+            .flex_1()
+            .flex()
+            .justify_center()
+            .overflow_hidden()
+            .child(div().h_full().w(relative(scale)).child(face_el));
+
+        div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _window, cx| this.on_key(ev, cx)))
             .on_scroll_wheel(
@@ -155,22 +378,8 @@ impl Render for Root {
             .flex_col()
             .size_full()
             .bg(rgb(0x0d1117))
-            .p_2();
-
-        match &self.terminal {
-            Some(term) => root.child(div().flex_1().child(terminal_element(
-                term.handle(),
-                FONT_FAMILY.into(),
-                px(FONT_SIZE),
-                Theme::default(),
-                focused,
-            ))),
-            None => root.text_color(rgb(0xff7b72)).child(
-                div()
-                    .font_family(FONT_FAMILY)
-                    .child("failed to start terminal — see logs"),
-            ),
-        }
+            .child(toolbar)
+            .child(pane)
     }
 }
 

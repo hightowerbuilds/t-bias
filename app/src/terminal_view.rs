@@ -85,6 +85,9 @@ pub fn terminal_element(
     font_size: Pixels,
     theme: Theme,
     focused: bool,
+    // While flipping, the element's width is being animated; skip reflowing the
+    // PTY so the shell doesn't thrash. The existing grid just clips.
+    frozen: bool,
 ) -> impl IntoElement {
     let base_font = font(font_family);
 
@@ -100,9 +103,11 @@ pub fn terminal_element(
                 .unwrap_or(font_size * 0.6);
             let line_h = font_size * LINE_HEIGHT;
 
-            let cols = ((bounds.size.width / cell_w).floor() as usize).max(1);
-            let rows = ((bounds.size.height / line_h).floor() as usize).max(1);
-            prepaint_handle.resize_to(TerminalSize::new(cols, rows));
+            if !frozen {
+                let cols = ((bounds.size.width / cell_w).floor() as usize).max(1);
+                let rows = ((bounds.size.height / line_h).floor() as usize).max(1);
+                prepaint_handle.resize_to(TerminalSize::new(cols, rows));
+            }
 
             GridMetrics { cell_w, line_h }
         },

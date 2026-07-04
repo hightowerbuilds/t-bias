@@ -252,7 +252,10 @@ DB layer built + unit-tested in `app/src/db.rs` while Xcode downloaded. The app-
 
 ## Phase 6 — File explorer + flip explorer
 
-- [ ] `fs` module: sandboxed list/read (root guard), sorted dirs-first.
+- [x] `fs` module → `app/src/fs.rs`: `Sandbox` with a lexical, **clamping** path guard (`..`
+      can never traverse out of the root — the security-critical part), `list_dir` (dirs-first,
+      case-insensitive), `read_text`, symlink-aware entry kinds. Ported from `fs/sandbox.ts`.
+      4 tests incl. traversal-cannot-read-outside-root. (UI below is blocked on the render fix.)
 - [ ] Explorer pane UI: header (path, up button) + scrollable entry list (gpui-component list).
 - [ ] Icons per type (dir/file/symlink/markdown).
 - [ ] Navigate into dirs; up-navigation; keyboard nav (optional).

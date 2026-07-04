@@ -6,6 +6,7 @@
 // drawn by the Phase 2 cell element (`terminal_view`).
 
 mod input;
+mod pane_tree;
 mod terminal;
 mod terminal_view;
 

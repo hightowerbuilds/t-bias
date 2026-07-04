@@ -199,9 +199,17 @@ control-code / CSI / app-cursor / modifier logic is pinned by tests, not eyeball
 
 ## Phase 4 — Workspace shell (tabs, splits, zoom)
 
-- [ ] Port `pane-tree` model to Rust: `Pane` enum (Terminal / Explorer / Split), `PaneMap`.
-- [ ] Port tree ops: `split_pane`, `close_pane`, `find_adjacent`, `leaf_ids`, DFS order.
-- [ ] Unit tests for tree ops (mirror the TS behavior).
+- [x] Port `pane-tree` model to Rust → `app/src/pane_tree.rs`: `Pane` enum
+      (Terminal / Explorer / Split), `PaneTree { panes: HashMap, root, next_id }` (the tree owns
+      id allocation, unlike the TS version which took ids from the caller).
+- [x] Port tree ops: `split`, `close` (collapse parent → sibling, rewire grandparent, return
+      focus leaf), `find_parent`, `first_leaf`, `leaf_ids`/`terminal_ids`/`explorer_ids` (DFS,
+      a-before-b), `adjacent` (linear Nav), `set_ratio` (clamp [0.1, 0.9]). Ported from
+      `src/pane-tree.ts`.
+- [x] Unit tests mirroring the TS behavior — 11 tests (new/split/split-copies-cwd/nested-parent-
+      rewire/close-collapse/close-nested-grandparent/close-root-noop/adjacent/ratio-clamp/
+      split-non-leaf-errors/type-filters), all pass. (Built ahead of UI wiring, which is blocked
+      on the text-rendering fix.)
 - [ ] Workspace state entity: tabs, active tab, active pane, per-tab pane tree, zoom, nextId.
 - [ ] Terminal session cache keyed by pane id (session survives split/zoom re-layout).
 - [ ] Tab bar UI (gpui-component tabs): add/close/select/reorder, active styling.

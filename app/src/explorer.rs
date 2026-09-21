@@ -87,8 +87,7 @@ impl Explorer {
 
     /// Adjust the preview font size by `delta` px, clamped.
     pub fn zoom_preview(&mut self, delta: f32) {
-        self.preview_font =
-            (self.preview_font + delta).clamp(PREVIEW_FONT_MIN, PREVIEW_FONT_MAX);
+        self.preview_font = (self.preview_font + delta).clamp(PREVIEW_FONT_MIN, PREVIEW_FONT_MAX);
     }
 
     pub fn reset_preview_font(&mut self) {
@@ -215,8 +214,7 @@ mod tests {
     #[test]
     fn repo_location_finds_git_root_and_rel() {
         // Build a temp repo: <tmp>/repo/.git and <tmp>/repo/a/b.
-        let base =
-            std::env::temp_dir().join(format!("tbias-explorer-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("tbias-explorer-{}", std::process::id()));
         let repo = base.join("repo");
         let deep = repo.join("a/b");
         std::fs::create_dir_all(repo.join(".git")).unwrap();

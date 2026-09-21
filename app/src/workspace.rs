@@ -1,14 +1,6 @@
-// t-bias — workspace state (Phase 4).
-//
-// The layout state for the whole window: an ordered list of tabs, each a pane
-// tree with an active pane and zoom flag, plus the active tab and id allocators.
-// Ported from the Deno app's `src/workspace/store.ts` — but pure state only: the
-// live terminal sessions and focus/font side effects are the UI's concern (the
-// session cache keys on (tab id, pane id) since pane ids are per-tree here).
-//
-// This is the same struct the DB persists (`crate::db`), so no separate snapshot
-// type. UI wiring lands with tab/split rendering (blocked on the render fix);
-// this module is headless-testable.
+//! Window layout state: ordered tabs, active panes, splits, and zoom.
+//! WorkspaceView owns live sessions; this model is shared with SQLite persistence.
+// Public model helpers are also exercised independently by the unit tests.
 #![allow(dead_code)]
 
 use crate::pane_tree::{Nav, Pane, PaneId, PaneTree, SplitDir};
@@ -115,6 +107,16 @@ impl Workspace {
         } else if was_active {
             let next = i.min(self.tabs.len() - 1);
             self.active_tab = self.tabs[next].id;
+        }
+    }
+
+    pub fn reorder_tab(&mut self, from: TabId, target: TabId) {
+        if from == target {
+            return;
+        }
+        if let (Some(a), Some(b)) = (self.index_of(from), self.index_of(target)) {
+            let tab = self.tabs.remove(a);
+            self.tabs.insert(b, tab);
         }
     }
 
@@ -249,7 +251,10 @@ mod tests {
         assert_eq!(ws.active_tab, 1);
         let tab = ws.active().unwrap();
         assert_eq!(tab.tree.leaf_ids().len(), 1);
-        assert!(matches!(tab.tree.get(tab.active_pane), Some(Pane::Terminal { .. })));
+        assert!(matches!(
+            tab.tree.get(tab.active_pane),
+            Some(Pane::Terminal { .. })
+        ));
     }
 
     #[test]
@@ -343,9 +348,15 @@ mod tests {
         let mut ws = Workspace::new();
         let id = ws.active().unwrap().active_pane;
         ws.flip_active();
-        assert!(matches!(ws.active().unwrap().tree.get(id), Some(Pane::Explorer { .. })));
+        assert!(matches!(
+            ws.active().unwrap().tree.get(id),
+            Some(Pane::Explorer { .. })
+        ));
         ws.flip_active();
-        assert!(matches!(ws.active().unwrap().tree.get(id), Some(Pane::Terminal { .. })));
+        assert!(matches!(
+            ws.active().unwrap().tree.get(id),
+            Some(Pane::Terminal { .. })
+        ));
     }
 
     #[test]

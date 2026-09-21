@@ -20,6 +20,11 @@ gpui = { version = "=0.2.2", features = ["macos-blade"] }
 alacritty_terminal = "0.26"
 portable-pty = "0.8"
 
+# Gamepad input (PS2/PlayStation controllers). Uses IOKit's IOHIDManager on
+# macOS; the `Gilrs` handle is !Send and pumps a CFRunLoop, so it must be
+# created and polled on one dedicated thread (see `gamepad.rs`).
+gilrs = "0.11"
+
 anyhow = "1"
 log = "0.4"
 futures = "0.3"
@@ -27,3 +32,6 @@ libc = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 # Bundled SQLite (compiled from source via the C toolchain in CLT) — no ORM.
 rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"

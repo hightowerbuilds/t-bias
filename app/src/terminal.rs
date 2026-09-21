@@ -29,6 +29,8 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 pub struct TerminalSize {
     pub cols: usize,
     pub lines: usize,
+    pub pixel_width: u16,
+    pub pixel_height: u16,
 }
 
 impl TerminalSize {
@@ -36,6 +38,8 @@ impl TerminalSize {
         Self {
             cols: cols.max(1),
             lines: lines.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
         }
     }
 }
@@ -77,12 +81,17 @@ pub struct Terminal {
     msg_tx: Sender<Msg>,
     /// The shell's pid, for querying its live working directory.
     shell_pid: Option<i32>,
+    writer_thread: Option<thread::JoinHandle<()>>,
+    size: Arc<std::sync::Mutex<TerminalSize>>,
 }
 
 impl Terminal {
     /// Spawn a shell and wire up the emulation pipeline. Returns the handle plus
     /// the receiver the GPUI side should drain (each item is a reason to repaint).
-    pub fn new(size: TerminalSize) -> Result<(Self, UnboundedReceiver<AlacEvent>)> {
+    pub fn new(
+        size: TerminalSize,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<(Self, UnboundedReceiver<AlacEvent>)> {
         let (event_tx, event_rx) = unbounded::<AlacEvent>();
 
         // Shared terminal state. The listener clone in the reader thread lets it
@@ -97,15 +106,18 @@ impl Terminal {
         let pair = pty_system.openpty(PtySize {
             rows: size.lines as u16,
             cols: size.cols as u16,
-            pixel_width: 0,
-            pixel_height: 0,
+            pixel_width: size.pixel_width,
+            pixel_height: size.pixel_height,
         })?;
 
         let mut cmd = CommandBuilder::new(user_shell());
         cmd.arg("-l"); // login shell; a tty with no -c is interactive for zsh/bash
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        if let Some(home) = std::env::var_os("HOME") {
+        cmd.env("TERM_PROGRAM", "t-bias");
+        if let Some(cwd) = cwd.filter(|p| p.is_dir()) {
+            cmd.cwd(cwd);
+        } else if let Some(home) = std::env::var_os("HOME") {
             cmd.cwd(home);
         }
 
@@ -118,6 +130,7 @@ impl Terminal {
         let writer = pair.master.take_writer()?;
         let master = pair.master;
 
+        let writer_event_tx = event_tx.clone();
         // Reader thread: PTY bytes -> VTE parser -> Term, then signal a repaint.
         {
             let term = term.clone();
@@ -129,9 +142,9 @@ impl Terminal {
 
         // Message thread: UI -> PTY (input, resize, shutdown).
         let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
-        thread::Builder::new()
+        let writer_thread = thread::Builder::new()
             .name("tbias-pty-writer".into())
-            .spawn(move || pty_message_loop(msg_rx, writer, master, child))
+            .spawn(move || pty_message_loop(msg_rx, writer, master, child, writer_event_tx))
             .expect("spawn pty writer");
 
         Ok((
@@ -139,9 +152,15 @@ impl Terminal {
                 term,
                 msg_tx,
                 shell_pid,
+                writer_thread: Some(writer_thread),
+                size: Arc::new(std::sync::Mutex::new(size)),
             },
             event_rx,
         ))
+    }
+
+    pub fn pid(&self) -> Option<i32> {
+        self.shell_pid
     }
 
     /// The shell's current working directory (macOS: via `proc_pidinfo`).
@@ -156,20 +175,24 @@ impl Terminal {
         TerminalHandle {
             term: self.term.clone(),
             msg_tx: self.msg_tx.clone(),
+            size: self.size.clone(),
         }
     }
-
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.msg_tx.send(Msg::Shutdown);
+        if let Some(thread) = self.writer_thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
 /// UI-thread handle for the renderer: read the shared grid, push resizes.
 #[derive(Clone)]
 pub struct TerminalHandle {
+    size: Arc<std::sync::Mutex<TerminalSize>>,
     term: Arc<FairMutex<Term<TbiasListener>>>,
     msg_tx: Sender<Msg>,
 }
@@ -185,6 +208,16 @@ impl TerminalHandle {
         let _ = self.msg_tx.send(Msg::Input(bytes.into()));
     }
 
+    pub fn selection_text(&self) -> Option<String> {
+        self.term.lock().selection_to_string()
+    }
+    pub fn mode(&self) -> TermMode {
+        *self.term.lock().mode()
+    }
+    pub fn clear_selection(&self) {
+        self.term.lock().selection = None;
+    }
+
     /// Terminal is in application-cursor-keys mode (DECCKM) — affects arrow keys.
     pub fn app_cursor(&self) -> bool {
         self.term.lock().mode().contains(TermMode::APP_CURSOR)
@@ -194,6 +227,11 @@ impl TerminalHandle {
     pub fn paste(&self, text: &str) {
         let bracketed = self.term.lock().mode().contains(TermMode::BRACKETED_PASTE);
         let normalized = text.replace("\r\n", "\r").replace('\n', "\r");
+        let normalized = if bracketed {
+            normalized.replace('\x1b', "")
+        } else {
+            normalized
+        };
         let mut bytes = Vec::with_capacity(normalized.len() + 12);
         if bracketed {
             bytes.extend_from_slice(b"\x1b[200~");
@@ -219,9 +257,12 @@ impl TerminalHandle {
     /// grid already has these dimensions (so the render loop can call it freely).
     pub fn resize_to(&self, size: TerminalSize) {
         let mut term = self.term.lock();
-        if term.columns() == size.cols && term.screen_lines() == size.lines {
+        let mut previous = self.size.lock().unwrap();
+        if *previous == size {
             return;
         }
+        *previous = size;
+        drop(previous);
         term.resize(size);
         drop(term);
         let _ = self.msg_tx.send(Msg::Resize(size));
@@ -238,8 +279,8 @@ fn pty_reader_loop(
     let mut buf = [0u8; 4096];
     loop {
         match reader.read(&mut buf) {
-            Ok(0) => break,             // EOF: shell closed the PTY
-            Err(_) => break,            // read error: treat as gone
+            Ok(0) => break,  // EOF: shell closed the PTY
+            Err(_) => break, // read error: treat as gone
             Ok(n) => {
                 {
                     let mut term = term.lock();
@@ -263,8 +304,20 @@ fn pty_message_loop(
     mut writer: Box<dyn Write + Send>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    event_tx: UnboundedSender<AlacEvent>,
 ) {
-    while let Ok(msg) = rx.recv() {
+    loop {
+        let msg = match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(msg) => msg,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if child.try_wait().ok().flatten().is_some() {
+                    let _ = event_tx.unbounded_send(AlacEvent::Exit);
+                    break;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Msg::Shutdown,
+        };
         match msg {
             Msg::Input(bytes) => {
                 let _ = writer.write_all(&bytes);
@@ -274,12 +327,30 @@ fn pty_message_loop(
                 let _ = master.resize(PtySize {
                     rows: size.lines as u16,
                     cols: size.cols as u16,
-                    pixel_width: 0,
-                    pixel_height: 0,
+                    pixel_width: size.pixel_width,
+                    pixel_height: size.pixel_height,
                 });
             }
             Msg::Shutdown => {
+                #[cfg(unix)]
+                if let Some(pid) = child.process_id() {
+                    // Signal the shell session and foreground job before reaping.
+                    if let Some(fd) = master.as_raw_fd() {
+                        let foreground = unsafe { libc::tcgetpgrp(fd) };
+                        if foreground > 0 && foreground != unsafe { libc::getpgrp() } {
+                            unsafe {
+                                libc::kill(-foreground, libc::SIGHUP);
+                                libc::kill(-foreground, libc::SIGCONT);
+                            }
+                        }
+                    }
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGHUP);
+                        libc::kill(-(pid as i32), libc::SIGCONT);
+                    }
+                }
                 let _ = child.kill();
+                let _ = child.wait();
                 break;
             }
         }
@@ -324,7 +395,9 @@ fn pid_cwd(pid: i32) -> Option<PathBuf> {
         if len == 0 {
             return None;
         }
-        Some(PathBuf::from(String::from_utf8_lossy(&flat[..len]).into_owned()))
+        Some(PathBuf::from(
+            String::from_utf8_lossy(&flat[..len]).into_owned(),
+        ))
     }
 }
 

@@ -5,3 +5,6 @@ sidecar/target/
 data/
 .DS_Store
 *.dylib
+
+app/target/
+dist-native/

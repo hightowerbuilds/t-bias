@@ -76,12 +76,22 @@ impl Sandbox {
         path
     }
 
+    fn checked_path(&self, subpath: &str) -> Result<PathBuf> {
+        let root = std::fs::canonicalize(&self.root)?;
+        let path = std::fs::canonicalize(self.resolve(subpath))?;
+        anyhow::ensure!(
+            path.starts_with(&root),
+            "path outside sandbox through symlink"
+        );
+        Ok(path)
+    }
+
     /// List a directory (dirs first, then case-insensitive by name).
     pub fn list_dir(&self, subpath: &str) -> Result<Vec<DirEntry>> {
-        let path = self.resolve(subpath);
+        let path = self.checked_path(subpath)?;
         let mut entries = Vec::new();
-        let read = std::fs::read_dir(&path)
-            .with_context(|| format!("reading dir {}", path.display()))?;
+        let read =
+            std::fs::read_dir(&path).with_context(|| format!("reading dir {}", path.display()))?;
         for entry in read {
             let entry = entry?;
             let file_type = entry.file_type()?;
@@ -101,7 +111,7 @@ impl Sandbox {
 
     /// Read a file as UTF-8 text.
     pub fn read_text(&self, subpath: &str) -> Result<String> {
-        let path = self.resolve(subpath);
+        let path = self.checked_path(subpath)?;
         std::fs::read_to_string(&path).with_context(|| format!("reading file {}", path.display()))
     }
 }
@@ -123,13 +133,33 @@ fn sort_entries(entries: &mut [DirEntry]) {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn symlink_cannot_read_outside_root() {
+        let base = std::env::temp_dir().join(format!("tbias-symlink-{}", std::process::id()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(base.join("outside.md"), "outside").unwrap();
+        let link = root.join("link.md");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(base.join("outside.md"), &link).unwrap();
+        assert!(Sandbox::new(&root).read_text("link.md").is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
     #[test]
     fn resolve_stays_within_root_on_traversal() {
         let sb = Sandbox::new("/srv/root");
         // Plain relative path.
-        assert_eq!(sb.resolve("docs/readme.md"), PathBuf::from("/srv/root/docs/readme.md"));
+        assert_eq!(
+            sb.resolve("docs/readme.md"),
+            PathBuf::from("/srv/root/docs/readme.md")
+        );
         // `..` is clamped — cannot escape the root.
-        assert_eq!(sb.resolve("../../etc/passwd"), PathBuf::from("/srv/root/etc/passwd"));
+        assert_eq!(
+            sb.resolve("../../etc/passwd"),
+            PathBuf::from("/srv/root/etc/passwd")
+        );
         assert_eq!(sb.resolve("a/../../b"), PathBuf::from("/srv/root/b"));
         // Leading slash is relative to the root, not absolute.
         assert_eq!(sb.resolve("/abs/path"), PathBuf::from("/srv/root/abs/path"));
@@ -144,15 +174,33 @@ mod tests {
     #[test]
     fn sort_puts_dirs_first_then_case_insensitive() {
         let mut v = vec![
-            DirEntry { name: "banana.txt".into(), kind: EntryKind::File },
-            DirEntry { name: "Zeta".into(), kind: EntryKind::Directory },
-            DirEntry { name: "apple".into(), kind: EntryKind::Directory },
-            DirEntry { name: "Alpha.md".into(), kind: EntryKind::File },
-            DirEntry { name: "link".into(), kind: EntryKind::Symlink },
+            DirEntry {
+                name: "banana.txt".into(),
+                kind: EntryKind::File,
+            },
+            DirEntry {
+                name: "Zeta".into(),
+                kind: EntryKind::Directory,
+            },
+            DirEntry {
+                name: "apple".into(),
+                kind: EntryKind::Directory,
+            },
+            DirEntry {
+                name: "Alpha.md".into(),
+                kind: EntryKind::File,
+            },
+            DirEntry {
+                name: "link".into(),
+                kind: EntryKind::Symlink,
+            },
         ];
         sort_entries(&mut v);
         let names: Vec<&str> = v.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["apple", "Zeta", "Alpha.md", "banana.txt", "link"]);
+        assert_eq!(
+            names,
+            vec!["apple", "Zeta", "Alpha.md", "banana.txt", "link"]
+        );
     }
 
     /// A scratch directory under the system temp dir, cleaned up on drop.

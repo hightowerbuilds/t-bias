@@ -1,16 +1,6 @@
-// t-bias — pane tree (Phase 4).
-//
-// Pure data model + tree ops for a tab's pane layout. A pane is a leaf
-// (terminal or explorer) or a binary split node. Ported from the Deno app's
-// `src/pane-tree.ts`; the tree owns id allocation here (the TS version took ids
-// from the caller) but the operations mirror it exactly — see the unit tests.
-//
-// Rendering, sessions, and drag-resize wire on top of this in later Phase 4
-// slices; this module is deliberately UI-free so it can be tested headlessly.
-//
-// The public API is exercised by unit tests but not yet by the UI (that lands
-// with the tab/split rendering, which is blocked on the text-rendering fix), so
-// allow dead code module-wide until then.
+//! Binary pane layout and tree operations, independent of the renderer.
+//! Each tree allocates its own IDs; live sessions are keyed by (tab, pane).
+// Public model helpers are also exercised independently by the unit tests.
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -118,6 +108,34 @@ impl PaneTree {
         self.root
     }
 
+    /// Reject corrupt persisted graphs before recursive layout or traversal.
+    pub fn validate(&self) -> Result<(), String> {
+        let mut seen = std::collections::HashSet::new();
+        let mut pending = vec![self.root];
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                return Err("pane graph contains a cycle or shared child".into());
+            }
+            match self.panes.get(&id) {
+                None => return Err("pane graph references a missing child".into()),
+                Some(Pane::Split { a, b, ratio, .. }) => {
+                    if !ratio.is_finite() || !(RATIO_MIN..=RATIO_MAX).contains(ratio) {
+                        return Err("invalid split ratio".into());
+                    }
+                    pending.extend([*a, *b]);
+                }
+                _ => {}
+            }
+        }
+        if seen.len() != self.panes.len() {
+            return Err("pane graph has unreachable nodes".into());
+        }
+        if self.panes.keys().any(|id| *id >= self.next_id) {
+            return Err("invalid pane id allocator".into());
+        }
+        Ok(())
+    }
+
     /// The next id the allocator will hand out (persisted so restores continue
     /// the sequence).
     pub fn next_id(&self) -> PaneId {
@@ -169,7 +187,12 @@ impl PaneTree {
         out
     }
 
-    fn collect_leaves(&self, id: PaneId, out: &mut Vec<PaneId>, keep: impl Fn(&Pane) -> bool + Copy) {
+    fn collect_leaves(
+        &self,
+        id: PaneId,
+        out: &mut Vec<PaneId>,
+        keep: impl Fn(&Pane) -> bool + Copy,
+    ) {
         let Some(pane) = self.panes.get(&id) else {
             return;
         };
@@ -336,6 +359,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn restored_cycles_and_missing_children_are_rejected() {
+        let panes = HashMap::from([(
+            1,
+            Pane::Split {
+                dir: SplitDir::Horizontal,
+                ratio: 0.5,
+                a: 1,
+                b: 2,
+            },
+        )]);
+        assert!(PaneTree::from_parts(panes, 1, 3).validate().is_err());
+        let mut tree = PaneTree::new();
+        tree.split(1, SplitDir::Horizontal).unwrap();
+        assert!(tree.validate().is_ok());
+        tree.panes.remove(&2);
+        assert!(tree.validate().is_err());
+    }
+
+    #[test]
     fn new_tree_is_single_terminal_leaf() {
         let t = PaneTree::new();
         assert_eq!(t.leaf_ids(), vec![t.root()]);
@@ -468,11 +510,17 @@ mod tests {
         t.split(a, SplitDir::Horizontal).unwrap();
         let split = t.root();
         t.set_ratio(split, 0.05);
-        assert!(matches!(t.get(split), Some(Pane::Split { ratio, .. }) if (*ratio - RATIO_MIN).abs() < 1e-6));
+        assert!(
+            matches!(t.get(split), Some(Pane::Split { ratio, .. }) if (*ratio - RATIO_MIN).abs() < 1e-6)
+        );
         t.set_ratio(split, 0.99);
-        assert!(matches!(t.get(split), Some(Pane::Split { ratio, .. }) if (*ratio - RATIO_MAX).abs() < 1e-6));
+        assert!(
+            matches!(t.get(split), Some(Pane::Split { ratio, .. }) if (*ratio - RATIO_MAX).abs() < 1e-6)
+        );
         t.set_ratio(split, 0.42);
-        assert!(matches!(t.get(split), Some(Pane::Split { ratio, .. }) if (*ratio - 0.42).abs() < 1e-6));
+        assert!(
+            matches!(t.get(split), Some(Pane::Split { ratio, .. }) if (*ratio - 0.42).abs() < 1e-6)
+        );
     }
 
     #[test]
@@ -481,8 +529,14 @@ mod tests {
         let a = t.root();
         t.split(a, SplitDir::Horizontal).unwrap();
         let split = t.root();
-        assert_eq!(t.split(split, SplitDir::Horizontal), Err(PaneError::NotALeaf(split)));
-        assert_eq!(t.split(999, SplitDir::Horizontal), Err(PaneError::NotFound(999)));
+        assert_eq!(
+            t.split(split, SplitDir::Horizontal),
+            Err(PaneError::NotALeaf(split))
+        );
+        assert_eq!(
+            t.split(999, SplitDir::Horizontal),
+            Err(PaneError::NotFound(999))
+        );
     }
 
     #[test]

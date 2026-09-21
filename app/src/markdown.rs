@@ -30,13 +30,26 @@ pub enum Inline {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Block {
-    Heading { level: u8, content: Vec<Inline> },
+    Heading {
+        level: u8,
+        content: Vec<Inline>,
+    },
     Paragraph(Vec<Inline>),
-    Code { lang: Option<String>, text: String },
-    List { ordered: bool, start: u64, items: Vec<Vec<Block>> },
+    Code {
+        lang: Option<String>,
+        text: String,
+    },
+    List {
+        ordered: bool,
+        start: u64,
+        items: Vec<Vec<Block>>,
+    },
     Quote(Vec<Block>),
     Rule,
-    Table { headers: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>> },
+    Table {
+        headers: Vec<Vec<Inline>>,
+        rows: Vec<Vec<Vec<Inline>>>,
+    },
 }
 
 // --- Parser ----------------------------------------------------------------
@@ -47,13 +60,23 @@ enum Frame {
     Para(Vec<Inline>),
     Heading(u8, Vec<Inline>),
     Quote(Vec<Block>),
-    List { ordered: bool, start: u64, items: Vec<Vec<Block>> },
+    List {
+        ordered: bool,
+        start: u64,
+        items: Vec<Vec<Block>>,
+    },
     Item(Vec<Block>),
-    Code { lang: Option<String>, text: String },
+    Code {
+        lang: Option<String>,
+        text: String,
+    },
     Emphasis(Vec<Inline>),
     Strong(Vec<Inline>),
     Strike(Vec<Inline>),
-    Link { url: String, text: Vec<Inline> },
+    Link {
+        url: String,
+        text: Vec<Inline>,
+    },
     Table {
         headers: Vec<Vec<Inline>>,
         rows: Vec<Vec<Vec<Inline>>>,
@@ -252,10 +275,7 @@ fn on_end(stack: &mut Vec<Frame>, end: TagEnd) {
             }
         }
         TagEnd::Table => {
-            if let Some(Frame::Table {
-                headers, rows, ..
-            }) = stack.pop()
-            {
+            if let Some(Frame::Table { headers, rows, .. }) = stack.pop() {
                 push_block(stack, Block::Table { headers, rows });
             }
         }
@@ -310,19 +330,99 @@ fn push_block(stack: &mut [Frame], block: Block) {
 
 // --- Rendering -------------------------------------------------------------
 
-const FG: u32 = 0xc9d1d9;
-const HEADING: u32 = 0xf0f6fc;
-const MUTED: u32 = 0x8b949e;
-const LINK: u32 = 0x58a6ff;
-const CODE_FG: u32 = 0xff7b72;
-const CODE_BG: u32 = 0x161b22;
-const BORDER: u32 = 0x30363d;
-const PROSE_FONT: &str = "Helvetica Neue";
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Skin {
+    #[default]
+    Default,
+    Newspaper,
+    Invoice,
+    Diagram,
+}
+impl Skin {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::Newspaper => "Newspaper",
+            Self::Invoice => "Invoice",
+            Self::Diagram => "Diagram",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            Self::Default => Self::Newspaper,
+            Self::Newspaper => Self::Invoice,
+            Self::Invoice => Self::Diagram,
+            Self::Diagram => Self::Default,
+        }
+    }
+    fn colors(self) -> Palette {
+        match self {
+            Self::Newspaper => Palette {
+                fg: 0x26221d,
+                heading: 0x171410,
+                muted: 0x6f6659,
+                link: 0x7b3f1c,
+                code_fg: 0x913e2a,
+                code_bg: 0xeee6d5,
+                border: 0xbdb09b,
+                bg: 0xf8f1e3,
+                font: "Georgia",
+            },
+            Self::Invoice => Palette {
+                fg: 0x25364a,
+                heading: 0x14273b,
+                muted: 0x63758a,
+                link: 0x0969da,
+                code_fg: 0x184877,
+                code_bg: 0xf0f4f8,
+                border: 0xc9d5e0,
+                bg: 0xffffff,
+                font: "Helvetica Neue",
+            },
+            Self::Diagram => Palette {
+                fg: 0xcce4e0,
+                heading: 0x7ee7d5,
+                muted: 0x87aaa4,
+                link: 0x5eead4,
+                code_fg: 0xfbd38d,
+                code_bg: 0x132a30,
+                border: 0x28515a,
+                bg: 0x0c1e24,
+                font: "Menlo",
+            },
+            _ => Palette {
+                fg: 0xc9d1d9,
+                heading: 0xf0f6fc,
+                muted: 0x8b949e,
+                link: 0x58a6ff,
+                code_fg: 0xff7b72,
+                code_bg: 0x161b22,
+                border: 0x30363d,
+                bg: 0x0d1117,
+                font: "Helvetica Neue",
+            },
+        }
+    }
+}
+#[derive(Clone, Copy)]
+struct Palette {
+    fg: u32,
+    heading: u32,
+    muted: u32,
+    link: u32,
+    code_fg: u32,
+    code_bg: u32,
+    border: u32,
+    bg: u32,
+    font: &'static str,
+}
 const MONO_FONT: &str = "Menlo";
 
 /// Render parsed markdown as a scrollable GPUI element at `font_size` px.
-pub fn markdown_element(blocks: &[Block], font_size: f32) -> AnyElement {
+pub fn markdown_element(blocks: &[Block], font_size: f32, skin: Skin) -> AnyElement {
+    let palette = skin.colors();
     let mut col = div()
+        .bg(rgb(palette.bg))
         .id("md-doc")
         .flex()
         .flex_col()
@@ -331,17 +431,21 @@ pub fn markdown_element(blocks: &[Block], font_size: f32) -> AnyElement {
         .overflow_y_scroll()
         .px_1()
         .py_3()
-        .font_family(PROSE_FONT)
+        .font_family(palette.font)
         .text_size(px(font_size))
-        .text_color(rgb(FG))
+        .text_color(rgb(palette.fg))
         .line_height(px(font_size * 1.35));
-    for block in blocks {
-        col = col.child(render_block(block, font_size));
+    for (index, block) in blocks.iter().enumerate() {
+        col = col.child(
+            div()
+                .id(("block", index))
+                .child(render_block(block, font_size, palette)),
+        );
     }
     col.into_any_element()
 }
 
-fn render_block(block: &Block, fs: f32) -> AnyElement {
+fn render_block(block: &Block, fs: f32, palette: Palette) -> AnyElement {
     match block {
         Block::Heading { level, content } => {
             let scale = match level {
@@ -356,12 +460,12 @@ fn render_block(block: &Block, fs: f32) -> AnyElement {
                 .text_size(px(fs * scale))
                 .line_height(px(fs * scale * 1.2))
                 .font_weight(FontWeight::BOLD)
-                .text_color(rgb(HEADING))
-                .child(inline_text(content, ("h", *level as usize)))
+                .text_color(rgb(palette.heading))
+                .child(inline_text(content, ("h", *level as usize), palette))
                 .into_any_element()
         }
         Block::Paragraph(inlines) => div()
-            .child(inline_text(inlines, "p"))
+            .child(inline_text(inlines, "p", palette))
             .into_any_element(),
         Block::Code { text, .. } => {
             let mut code = div()
@@ -369,8 +473,8 @@ fn render_block(block: &Block, fs: f32) -> AnyElement {
                 .flex_col()
                 .font_family(MONO_FONT)
                 .text_size(px(fs * 0.9))
-                .text_color(rgb(FG))
-                .bg(rgb(CODE_BG))
+                .text_color(rgb(palette.fg))
+                .bg(rgb(palette.code_bg))
                 .rounded_md()
                 .px_3()
                 .py_2()
@@ -394,15 +498,25 @@ fn render_block(block: &Block, fs: f32) -> AnyElement {
                     "•".to_string()
                 };
                 let mut item_col = div().flex().flex_col().gap_1().flex_1();
-                for b in item {
-                    item_col = item_col.child(render_block(b, fs));
+                for (index, b) in item.iter().enumerate() {
+                    item_col = item_col.child(
+                        div()
+                            .id(("item-block", index))
+                            .child(render_block(b, fs, palette)),
+                    );
                 }
                 list = list.child(
                     div()
+                        .id(("list-item", i))
                         .flex()
                         .flex_row()
                         .gap_2()
-                        .child(div().flex_none().text_color(rgb(MUTED)).child(marker))
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(rgb(palette.muted))
+                                .child(marker),
+                        )
                         .child(item_col),
                 );
             }
@@ -414,40 +528,52 @@ fn render_block(block: &Block, fs: f32) -> AnyElement {
                 .flex_col()
                 .gap_2()
                 .border_l_2()
-                .border_color(rgb(BORDER))
+                .border_color(rgb(palette.border))
                 .pl_3()
-                .text_color(rgb(MUTED));
-            for b in blocks {
-                quote = quote.child(render_block(b, fs));
+                .text_color(rgb(palette.muted));
+            for (index, b) in blocks.iter().enumerate() {
+                quote = quote.child(
+                    div()
+                        .id(("quote-block", index))
+                        .child(render_block(b, fs, palette)),
+                );
             }
             quote.into_any_element()
         }
         Block::Rule => div()
             .h(px(1.))
             .w_full()
-            .bg(rgb(BORDER))
+            .bg(rgb(palette.border))
             .into_any_element(),
-        Block::Table { headers, rows } => render_table(headers, rows, fs),
+        Block::Table { headers, rows } => render_table(headers, rows, fs, palette),
     }
 }
 
-fn render_table(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>], _fs: f32) -> AnyElement {
+fn render_table(
+    headers: &[Vec<Inline>],
+    rows: &[Vec<Vec<Inline>>],
+    _fs: f32,
+    palette: Palette,
+) -> AnyElement {
     let cell = |content: &[Inline], id: (&'static str, usize), bold: bool| {
         let mut c = div()
             .flex_1()
             .px_2()
             .py_1()
             .border_1()
-            .border_color(rgb(BORDER));
+            .border_color(rgb(palette.border));
         if bold {
-            c = c.font_weight(FontWeight::BOLD).text_color(rgb(HEADING));
+            c = c
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(palette.heading));
         }
-        c.child(inline_text(content, id)).into_any_element()
+        c.child(inline_text(content, id, palette))
+            .into_any_element()
     };
 
     let mut table = div().flex().flex_col();
     if !headers.is_empty() {
-        let mut hrow = div().flex().flex_row().bg(rgb(CODE_BG));
+        let mut hrow = div().flex().flex_row().bg(rgb(palette.code_bg));
         for (i, h) in headers.iter().enumerate() {
             hrow = hrow.child(cell(h, ("th", i), true));
         }
@@ -464,14 +590,49 @@ fn render_table(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>], _fs: f32) ->
 }
 
 /// Flowing text with per-range styling for inline emphasis/code/links.
-fn inline_text(inlines: &[Inline], id: impl Into<ElementId>) -> AnyElement {
+fn inline_text(inlines: &[Inline], id: impl Into<ElementId>, palette: Palette) -> AnyElement {
     let mut text = String::new();
     let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
-    flatten(inlines, HighlightStyle::default(), &mut text, &mut highlights);
-    let _ = id; // StyledText is not stateful; id kept for call-site clarity
-    StyledText::new(SharedString::from(text))
-        .with_highlights(highlights)
+    flatten(
+        inlines,
+        HighlightStyle::default(),
+        &mut text,
+        &mut highlights,
+        palette,
+    );
+    let mut links = Vec::new();
+    collect_links(inlines, &mut 0, &mut links);
+    let styled = StyledText::new(SharedString::from(text)).with_highlights(highlights);
+    let ranges = links.iter().map(|(r, _)| r.clone()).collect();
+    gpui::InteractiveText::new(id, styled)
+        .on_click(ranges, move |i, _, cx| {
+            if let Some((_, url)) = links.get(i) {
+                if url.starts_with("https://")
+                    || url.starts_with("http://")
+                    || url.starts_with("mailto:")
+                {
+                    cx.open_url(url);
+                }
+            }
+        })
         .into_any_element()
+}
+
+fn collect_links(inlines: &[Inline], offset: &mut usize, links: &mut Vec<(Range<usize>, String)>) {
+    for inline in inlines {
+        match inline {
+            Inline::Text(t) | Inline::Code(t) => *offset += t.len(),
+            Inline::Emph(v) | Inline::Strong(v) | Inline::Strike(v) => {
+                collect_links(v, offset, links)
+            }
+            Inline::Link { text, url } => {
+                let start = *offset;
+                collect_links(text, offset, links);
+                links.push((start..*offset, url.clone()));
+            }
+            Inline::SoftBreak | Inline::HardBreak => *offset += 1,
+        }
+    }
 }
 
 fn flatten(
@@ -479,6 +640,7 @@ fn flatten(
     base: HighlightStyle,
     out: &mut String,
     hl: &mut Vec<(Range<usize>, HighlightStyle)>,
+    palette: Palette,
 ) {
     for inline in inlines {
         match inline {
@@ -491,19 +653,19 @@ fn flatten(
                 let start = out.len();
                 out.push_str(t);
                 let mut style = base;
-                style.color = Some(rgb(CODE_FG).into());
-                style.background_color = Some(rgb(CODE_BG).into());
+                style.color = Some(rgb(palette.code_fg).into());
+                style.background_color = Some(rgb(palette.code_bg).into());
                 hl.push((start..out.len(), style));
             }
             Inline::Emph(v) => {
                 let mut style = base;
                 style.font_style = Some(FontStyle::Italic);
-                flatten(v, style, out, hl);
+                flatten(v, style, out, hl, palette);
             }
             Inline::Strong(v) => {
                 let mut style = base;
                 style.font_weight = Some(FontWeight::BOLD);
-                flatten(v, style, out, hl);
+                flatten(v, style, out, hl, palette);
             }
             Inline::Strike(v) => {
                 let mut style = base;
@@ -511,17 +673,17 @@ fn flatten(
                     thickness: px(1.),
                     color: None,
                 });
-                flatten(v, style, out, hl);
+                flatten(v, style, out, hl, palette);
             }
             Inline::Link { text, .. } => {
                 let mut style = base;
-                style.color = Some(rgb(LINK).into());
+                style.color = Some(rgb(palette.link).into());
                 style.underline = Some(UnderlineStyle {
                     thickness: px(1.),
                     color: None,
                     wavy: false,
                 });
-                flatten(text, style, out, hl);
+                flatten(text, style, out, hl, palette);
             }
             Inline::SoftBreak => out.push(' '),
             Inline::HardBreak => out.push('\n'),
@@ -585,9 +747,7 @@ mod tests {
         assert!(!ordered);
         assert_eq!(items.len(), 2);
         // Second item contains a paragraph and a nested list.
-        assert!(items[1]
-            .iter()
-            .any(|b| matches!(b, Block::List { .. })));
+        assert!(items[1].iter().any(|b| matches!(b, Block::List { .. })));
     }
 
     #[test]

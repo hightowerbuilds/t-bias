@@ -1,3 +1,4 @@
+use std::{cell::Cell, rc::Rc};
 // t-bias — terminal cell rendering (Phase 2).
 //
 // A GPUI `canvas` element that measures a monospace font, reads the emulator's
@@ -10,14 +11,13 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, CursorShape, NamedColor};
 use gpui::{
     canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Font, FontStyle,
-    FontWeight, IntoElement, Pixels, Rgba, SharedString, Styled, StrikethroughStyle, TextRun,
+    FontWeight, IntoElement, Pixels, Rgba, SharedString, StrikethroughStyle, Styled, TextRun,
     UnderlineStyle, Window,
 };
 
 use crate::terminal::{TerminalHandle, TerminalSize};
 
 /// Terminal cell line spacing as a multiple of the font size.
-const LINE_HEIGHT: f32 = 1.3;
 
 /// A terminal color theme: 16 ANSI slots plus defaults. Static for now; Phase 8
 /// makes it configurable and lets OSC sequences repaint the live palette.
@@ -29,6 +29,64 @@ pub struct Theme {
     pub cursor: Rgba,
 }
 
+impl Theme {
+    pub fn chrome(&self) -> Rgba {
+        self.bg.blend(gpui::rgba(if self.bg.r > 0.5 {
+            0x0000000c
+        } else {
+            0xffffff0c
+        }))
+    }
+    pub fn raised(&self) -> Rgba {
+        self.bg.blend(gpui::rgba(if self.bg.r > 0.5 {
+            0x00000018
+        } else {
+            0xffffff18
+        }))
+    }
+    pub fn muted(&self) -> Rgba {
+        Rgba {
+            r: (self.fg.r + self.bg.r) * 0.5,
+            g: (self.fg.g + self.bg.g) * 0.5,
+            b: (self.fg.b + self.bg.b) * 0.5,
+            a: 1.,
+        }
+    }
+
+    pub fn from_config(config: &crate::config::Config) -> Self {
+        let mut t = Self::default();
+        match config.theme.as_str() {
+            "light" => {
+                t.bg = hexrgb(0xf6f8fa);
+                t.fg = hexrgb(0x24292f);
+                t.cursor = hexrgb(0x0969da);
+                t.ansi[7] = hexrgb(0x57606a);
+                t.ansi[15] = hexrgb(0x24292f);
+            }
+            "dracula" => {
+                t.bg = hexrgb(0x282a36);
+                t.fg = hexrgb(0xf8f8f2);
+                t.cursor = hexrgb(0xbd93f9);
+            }
+            _ => {}
+        }
+        t.bg.a = config.opacity;
+        t
+    }
+    pub fn query_color(&self, i: usize) -> alacritty_terminal::vte::ansi::Rgb {
+        let c = match i {
+            0..=255 => indexed(i as u8, self),
+            256 => self.fg,
+            258 => self.cursor,
+            _ => self.bg,
+        };
+        alacritty_terminal::vte::ansi::Rgb {
+            r: (c.r * 255.) as u8,
+            g: (c.g * 255.) as u8,
+            b: (c.b * 255.) as u8,
+        }
+    }
+}
 impl Default for Theme {
     fn default() -> Self {
         // GitHub-dark-ish palette; `bg` matches the window background.
@@ -59,9 +117,10 @@ impl Default for Theme {
 }
 
 /// One resolved cell, ready to paint.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RenderCell {
     ch: char,
+    combining: String,
     fg: Rgba,
     bg: Rgba,
     bold: bool,
@@ -72,10 +131,13 @@ struct RenderCell {
     spacer: bool,
 }
 
-struct GridMetrics {
-    cell_w: Pixels,
-    line_h: Pixels,
+#[derive(Clone, Copy)]
+pub struct GridMetrics {
+    pub cell_w: Pixels,
+    pub line_h: Pixels,
+    pub bounds: Bounds<Pixels>,
 }
+pub type SharedMetrics = Rc<Cell<Option<GridMetrics>>>;
 
 /// Build the terminal grid element. Fills its parent; measures the grid from its
 /// own painted bounds and reflows the PTY to match.
@@ -88,6 +150,10 @@ pub fn terminal_element(
     // While flipping, the element's width is being animated; skip reflowing the
     // PTY so the shell doesn't thrash. The existing grid just clips.
     frozen: bool,
+    line_height: f32,
+    geometry: SharedMetrics,
+    pane: gpui::Entity<crate::terminal_pane::TerminalPane>,
+    cursor_visible: bool,
 ) -> impl IntoElement {
     let base_font = font(font_family);
 
@@ -101,19 +167,43 @@ pub fn terminal_element(
                 .advance(font_id, font_size, 'm')
                 .map(|s| s.width)
                 .unwrap_or(font_size * 0.6);
-            let line_h = font_size * LINE_HEIGHT;
+            let line_h = font_size * line_height;
 
             if !frozen {
                 let cols = ((bounds.size.width / cell_w).floor() as usize).max(1);
                 let rows = ((bounds.size.height / line_h).floor() as usize).max(1);
-                prepaint_handle.resize_to(TerminalSize::new(cols, rows));
+                let mut size = TerminalSize::new(cols, rows);
+                size.pixel_width = (f32::from(cell_w) * cols as f32).min(u16::MAX as f32) as u16;
+                size.pixel_height = (f32::from(line_h) * rows as f32).min(u16::MAX as f32) as u16;
+                prepaint_handle.resize_to(size);
             }
 
-            GridMetrics { cell_w, line_h }
+            let metrics = GridMetrics {
+                cell_w,
+                line_h,
+                bounds,
+            };
+            geometry.set(Some(metrics));
+            metrics
         },
         move |bounds, metrics, window, cx| {
+            let focus = pane.read(cx).focus.clone();
+            window.handle_input(
+                &focus,
+                gpui::ElementInputHandler::new(bounds, pane.clone()),
+                cx,
+            );
             paint_grid(
-                &handle, &base_font, font_size, &theme, focused, bounds, &metrics, window, cx,
+                &handle,
+                &base_font,
+                font_size,
+                &theme,
+                focused,
+                bounds,
+                &metrics,
+                cursor_visible,
+                window,
+                cx,
             );
         },
     )
@@ -129,9 +219,30 @@ fn paint_grid(
     focused: bool,
     bounds: Bounds<Pixels>,
     metrics: &GridMetrics,
+    cursor_visible: bool,
     window: &mut Window,
     cx: &mut App,
 ) {
+    let mut live_theme = *theme;
+    {
+        let t = handle.term().lock();
+        for i in 0..16 {
+            if let Some(c) = t.colors()[i] {
+                live_theme.ansi[i] = rgb_u8(c.r, c.g, c.b);
+            }
+        }
+        if let Some(c) = t.colors()[NamedColor::Foreground as usize] {
+            live_theme.fg = rgb_u8(c.r, c.g, c.b);
+        }
+        if let Some(c) = t.colors()[NamedColor::Background as usize] {
+            live_theme.bg = rgb_u8(c.r, c.g, c.b);
+        }
+        if let Some(c) = t.colors()[NamedColor::Cursor as usize] {
+            live_theme.cursor = rgb_u8(c.r, c.g, c.b);
+        }
+    }
+    let theme = &live_theme;
+    window.paint_quad(fill(bounds, theme.bg));
     let cell_w = metrics.cell_w;
     let line_h = metrics.line_h;
     let text_system = window.text_system().clone();
@@ -143,6 +254,7 @@ fn paint_grid(
         let rows = term.screen_lines();
         let default = RenderCell {
             ch: ' ',
+            combining: String::new(),
             fg: theme.fg,
             bg: theme.bg,
             bold: false,
@@ -155,7 +267,7 @@ fn paint_grid(
 
         let content = term.renderable_content();
         for indexed in content.display_iter {
-            let line = indexed.point.line.0;
+            let line = indexed.point.line.0 + content.display_offset as i32;
             let col = indexed.point.column.0;
             if line < 0 || line as usize >= rows || col >= cols {
                 continue;
@@ -168,9 +280,18 @@ fn paint_grid(
                 grid[line as usize][col].spacer = true;
                 continue;
             }
-            let (fg, bg) = cell_colors(cell.c, cell.fg, cell.bg, flags, theme);
+            let (mut fg, mut bg) = cell_colors(cell.c, cell.fg, cell.bg, flags, theme);
+            if content
+                .selection
+                .as_ref()
+                .is_some_and(|s| s.contains(indexed.point))
+            {
+                bg = hexrgb(0x385b85);
+                fg = hexrgb(0xffffff);
+            }
             grid[line as usize][col] = RenderCell {
                 ch: cell.c,
+                combining: cell.zerowidth().unwrap_or(&[]).iter().collect(),
                 fg,
                 bg,
                 bold: flags.contains(Flags::BOLD),
@@ -181,7 +302,8 @@ fn paint_grid(
             };
         }
 
-        let cursor = content.cursor;
+        let mut cursor = content.cursor;
+        cursor.point.line.0 += content.display_offset as i32;
         (grid, cols, rows, cursor)
     };
 
@@ -216,6 +338,7 @@ fn paint_grid(
             let mut buf = [0u8; 4];
             let s = cell.ch.encode_utf8(&mut buf);
             text.push_str(s);
+            text.push_str(&cell.combining);
 
             let mut f = base_font.clone();
             if cell.bold {
@@ -225,7 +348,7 @@ fn paint_grid(
                 f.style = FontStyle::Italic;
             }
             runs.push(TextRun {
-                len: s.len(),
+                len: s.len() + cell.combining.len(),
                 font: f,
                 color: cell.fg.into(),
                 background_color: None,
@@ -249,7 +372,7 @@ fn paint_grid(
     }
 
     // Cursor: focused → solid block with the glyph inverted; unfocused → hollow.
-    if cursor.shape != CursorShape::Hidden {
+    if cursor.shape != CursorShape::Hidden && (!focused || cursor_visible) {
         let line = cursor.point.line.0;
         let col = cursor.point.column.0;
         if line >= 0 && (line as usize) < rows && col < cols {
@@ -258,9 +381,16 @@ fn paint_grid(
             let y = bounds.origin.y + r * line_h;
             let cell_bounds = Bounds::new(point(x, y), size(cell_w, line_h));
             if focused {
-                window.paint_quad(fill(cell_bounds, theme.cursor));
-                let cell = grid[r][col];
-                if !cell.spacer && cell.ch != ' ' {
+                let cursor_bounds = match cursor.shape {
+                    CursorShape::Beam => Bounds::new(point(x, y), size(px(2.), line_h)),
+                    CursorShape::Underline => {
+                        Bounds::new(point(x, y + line_h - px(2.)), size(cell_w, px(2.)))
+                    }
+                    _ => cell_bounds,
+                };
+                window.paint_quad(fill(cursor_bounds, theme.cursor));
+                let cell = &grid[r][col];
+                if cursor.shape == CursorShape::Block && !cell.spacer && cell.ch != ' ' {
                     let mut buf = [0u8; 4];
                     let s = cell.ch.encode_utf8(&mut buf);
                     let run = TextRun {

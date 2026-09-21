@@ -1,18 +1,6 @@
-// t-bias — SQLite persistence (Phase 5).
-//
-// A direct, in-process rusqlite layer (no ORM). Serializes the workspace — tabs
-// and their pane trees — into `workspaces` / `tabs` / `panes`, and records shell
-// lifecycle in `shells`. The tree shape is stored via each split's `a`/`b`
-// child pointers plus a recomputed `parent_id` (root = the pane with no parent),
-// mirroring the Deno app's `db/`.
-//
-// Timestamps are passed in by the caller (millis) so this layer stays clock-free
-// and unit-testable against an in-memory DB. UI wiring (autosave on layout
-// change, save on quit, load on startup) lands with the Phase 4 workspace UI,
-// which is blocked on the text-rendering fix.
-
-// UI wiring (autosave, save-on-quit, load-on-startup) lands with the Phase 4
-// workspace UI, blocked on the text-rendering fix — allow dead code until then.
+//! SQLite workspace snapshots and shell lifecycle records.
+//! WorkspaceView handles startup restore, debounced autosave, and quit.
+// Public model helpers are also exercised independently by the unit tests.
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -86,9 +74,7 @@ pub struct ShellRecord {
 
 /// `~/Library/Application Support/com.tbias.app/tbias.db`, creating the dir.
 pub fn default_db_path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME not set")?;
-    let dir = PathBuf::from(home)
-        .join("Library/Application Support/com.tbias.app");
+    let dir = crate::config::data_dir()?;
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("creating app-data dir {}", dir.display()))?;
     Ok(dir.join("tbias.db"))
@@ -96,8 +82,8 @@ pub fn default_db_path() -> Result<PathBuf> {
 
 /// Open (creating if needed) a DB at `path` and run migrations.
 pub fn open(path: &std::path::Path) -> Result<Connection> {
-    let conn = Connection::open(path)
-        .with_context(|| format!("opening db at {}", path.display()))?;
+    let conn =
+        Connection::open(path).with_context(|| format!("opening db at {}", path.display()))?;
     migrate(&conn)?;
     Ok(conn)
 }
@@ -133,8 +119,14 @@ pub fn save_workspace(conn: &mut Connection, ws: &Workspace, updated_at: i64) ->
     )?;
 
     // Rewrite tabs + panes wholesale — simplest correct snapshot.
-    tx.execute("DELETE FROM panes WHERE workspace_id = ?1", params![WORKSPACE_ID])?;
-    tx.execute("DELETE FROM tabs WHERE workspace_id = ?1", params![WORKSPACE_ID])?;
+    tx.execute(
+        "DELETE FROM panes WHERE workspace_id = ?1",
+        params![WORKSPACE_ID],
+    )?;
+    tx.execute(
+        "DELETE FROM tabs WHERE workspace_id = ?1",
+        params![WORKSPACE_ID],
+    )?;
 
     for (sort_order, tab) in ws.tabs.iter().enumerate() {
         tx.execute(
@@ -208,28 +200,33 @@ pub fn load_workspace(conn: &Connection) -> Result<Option<Workspace>> {
     )?;
     let tab_rows: Vec<(i64, String, i64, i64, i64)> = tab_stmt
         .query_map(params![WORKSPACE_ID], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-            ))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut tabs = Vec::with_capacity(tab_rows.len());
     for (tab_id, title, active_pane, zoomed, next_pane_id) in tab_rows {
         let (panes, root) = load_panes(conn, tab_id, active_pane)?;
+        let tree = PaneTree::from_parts(panes, root, next_pane_id as u64);
+        tree.validate().map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(
+            tree.get(active_pane as u64).is_some_and(Pane::is_leaf),
+            "invalid active pane"
+        );
         tabs.push(Tab {
             id: tab_id as u64,
             title,
             active_pane: active_pane as u64,
             zoomed: zoomed != 0,
-            tree: PaneTree::from_parts(panes, root, next_pane_id as u64),
+            tree,
         });
     }
 
+    anyhow::ensure!(
+        tabs.iter().any(|t| t.id == active_tab as u64)
+            && tabs.iter().all(|t| t.id < next_tab_id as u64),
+        "invalid active tab or allocator"
+    );
     Ok(Some(Workspace {
         name,
         active_tab: active_tab as u64,
@@ -523,7 +520,15 @@ mod tests {
     #[test]
     fn shell_records_insert_and_exit() {
         let conn = open_in_memory().unwrap();
-        let id = insert_shell(&conn, 7, Some(4242), Some("/bin/zsh -l"), Some("/home"), 100).unwrap();
+        let id = insert_shell(
+            &conn,
+            7,
+            Some(4242),
+            Some("/bin/zsh -l"),
+            Some("/home"),
+            100,
+        )
+        .unwrap();
         mark_shell_exited(&conn, id, "exited", 200).unwrap();
         let shells = list_shells(&conn).unwrap();
         assert_eq!(shells.len(), 1);

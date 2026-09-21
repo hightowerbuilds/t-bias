@@ -182,18 +182,39 @@ mod tests {
 
     #[test]
     fn printable() {
-        assert_eq!(encode_key("a", Some("a"), KeyMods::default(), false), Some(b"a".to_vec()));
+        assert_eq!(
+            encode_key("a", Some("a"), KeyMods::default(), false),
+            Some(b"a".to_vec())
+        );
         // Shift is already folded into key_char.
-        assert_eq!(encode_key("a", Some("A"), shift(), false), Some(b"A".to_vec()));
+        assert_eq!(
+            encode_key("a", Some("A"), shift(), false),
+            Some(b"A".to_vec())
+        );
     }
 
     #[test]
     fn enter_tab_backspace_escape() {
-        assert_eq!(encode_key("enter", None, KeyMods::default(), false), Some(vec![b'\r']));
-        assert_eq!(encode_key("tab", None, KeyMods::default(), false), Some(vec![b'\t']));
-        assert_eq!(encode_key("tab", None, shift(), false), Some(b"\x1b[Z".to_vec()));
-        assert_eq!(encode_key("backspace", None, KeyMods::default(), false), Some(vec![0x7f]));
-        assert_eq!(encode_key("escape", None, KeyMods::default(), false), Some(vec![0x1b]));
+        assert_eq!(
+            encode_key("enter", None, KeyMods::default(), false),
+            Some(vec![b'\r'])
+        );
+        assert_eq!(
+            encode_key("tab", None, KeyMods::default(), false),
+            Some(vec![b'\t'])
+        );
+        assert_eq!(
+            encode_key("tab", None, shift(), false),
+            Some(b"\x1b[Z".to_vec())
+        );
+        assert_eq!(
+            encode_key("backspace", None, KeyMods::default(), false),
+            Some(vec![0x7f])
+        );
+        assert_eq!(
+            encode_key("escape", None, KeyMods::default(), false),
+            Some(vec![0x1b])
+        );
     }
 
     #[test]
@@ -206,26 +227,59 @@ mod tests {
 
     #[test]
     fn alt_prefixes_escape() {
-        assert_eq!(encode_key("b", Some("b"), alt(), false), Some(vec![0x1b, b'b']));
-        assert_eq!(encode_key("enter", None, alt(), false), Some(vec![0x1b, b'\r']));
+        assert_eq!(
+            encode_key("b", Some("b"), alt(), false),
+            Some(vec![0x1b, b'b'])
+        );
+        assert_eq!(
+            encode_key("enter", None, alt(), false),
+            Some(vec![0x1b, b'\r'])
+        );
     }
 
     #[test]
     fn arrows_normal_vs_application() {
-        assert_eq!(encode_key("up", None, KeyMods::default(), false), Some(b"\x1b[A".to_vec()));
-        assert_eq!(encode_key("up", None, KeyMods::default(), true), Some(b"\x1bOA".to_vec()));
-        assert_eq!(encode_key("left", None, KeyMods::default(), false), Some(b"\x1b[D".to_vec()));
+        assert_eq!(
+            encode_key("up", None, KeyMods::default(), false),
+            Some(b"\x1b[A".to_vec())
+        );
+        assert_eq!(
+            encode_key("up", None, KeyMods::default(), true),
+            Some(b"\x1bOA".to_vec())
+        );
+        assert_eq!(
+            encode_key("left", None, KeyMods::default(), false),
+            Some(b"\x1b[D".to_vec())
+        );
         // A modifier forces the CSI form even in application mode.
-        assert_eq!(encode_key("up", None, shift(), true), Some(b"\x1b[1;2A".to_vec()));
+        assert_eq!(
+            encode_key("up", None, shift(), true),
+            Some(b"\x1b[1;2A".to_vec())
+        );
     }
 
     #[test]
     fn edit_and_function_keys() {
-        assert_eq!(encode_key("pageup", None, KeyMods::default(), false), Some(b"\x1b[5~".to_vec()));
-        assert_eq!(encode_key("delete", None, KeyMods::default(), false), Some(b"\x1b[3~".to_vec()));
-        assert_eq!(encode_key("f1", None, KeyMods::default(), false), Some(b"\x1bOP".to_vec()));
-        assert_eq!(encode_key("f5", None, KeyMods::default(), false), Some(b"\x1b[15~".to_vec()));
-        assert_eq!(encode_key("f12", None, KeyMods::default(), false), Some(b"\x1b[24~".to_vec()));
+        assert_eq!(
+            encode_key("pageup", None, KeyMods::default(), false),
+            Some(b"\x1b[5~".to_vec())
+        );
+        assert_eq!(
+            encode_key("delete", None, KeyMods::default(), false),
+            Some(b"\x1b[3~".to_vec())
+        );
+        assert_eq!(
+            encode_key("f1", None, KeyMods::default(), false),
+            Some(b"\x1bOP".to_vec())
+        );
+        assert_eq!(
+            encode_key("f5", None, KeyMods::default(), false),
+            Some(b"\x1b[15~".to_vec())
+        );
+        assert_eq!(
+            encode_key("f12", None, KeyMods::default(), false),
+            Some(b"\x1b[24~".to_vec())
+        );
     }
 
     #[test]

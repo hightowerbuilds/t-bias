@@ -8,3 +8,6 @@ data/
 
 app/target/
 dist-native/
+experiments/gpui-kit/target/
+experiments/gpui-kit/dist/
+experiments/gpui-kit/evidence/

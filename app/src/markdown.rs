@@ -420,6 +420,15 @@ const MONO_FONT: &str = "Menlo";
 
 /// Render parsed markdown as a scrollable GPUI element at `font_size` px.
 pub fn markdown_element(blocks: &[Block], font_size: f32, skin: Skin) -> AnyElement {
+    markdown_document(blocks, font_size, skin, true)
+}
+
+/// Content for readers that own their scroll handle and keyboard navigation.
+pub fn markdown_content(blocks: &[Block], font_size: f32, skin: Skin) -> AnyElement {
+    markdown_document(blocks, font_size, skin, false)
+}
+
+fn markdown_document(blocks: &[Block], font_size: f32, skin: Skin, scrollable: bool) -> AnyElement {
     let palette = skin.colors();
     let mut col = div()
         .bg(rgb(palette.bg))
@@ -427,18 +436,24 @@ pub fn markdown_element(blocks: &[Block], font_size: f32, skin: Skin) -> AnyElem
         .flex()
         .flex_col()
         .gap(px(font_size * 0.5))
-        .size_full()
-        .overflow_y_scroll()
+        .w_full()
+        .min_w_0()
         .px_1()
         .py_3()
         .font_family(palette.font)
         .text_size(px(font_size))
         .text_color(rgb(palette.fg))
         .line_height(px(font_size * 1.35));
+    if scrollable {
+        col = col.h_full().overflow_y_scroll();
+    }
     for (index, block) in blocks.iter().enumerate() {
         col = col.child(
             div()
                 .id(("block", index))
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
                 .child(render_block(block, font_size, palette)),
         );
     }
@@ -558,6 +573,7 @@ fn render_table(
     let cell = |content: &[Inline], id: (&'static str, usize), bold: bool| {
         let mut c = div()
             .flex_1()
+            .min_w_0()
             .px_2()
             .py_1()
             .border_1()
@@ -571,7 +587,7 @@ fn render_table(
             .into_any_element()
     };
 
-    let mut table = div().flex().flex_col();
+    let mut table = div().w_full().min_w_0().flex().flex_col();
     if !headers.is_empty() {
         let mut hrow = div().flex().flex_row().bg(rgb(palette.code_bg));
         for (i, h) in headers.iter().enumerate() {

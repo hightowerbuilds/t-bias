@@ -2,6 +2,8 @@
 
 **Updated 2026-09-20. Native implementation and local packaging complete; Developer ID signing complete, notarization awaits a keychain profile.**
 
+**2026-09-21 update:** the [GPUI Kit migration](gpui-kit-integration-roadmap.md) supersedes the renderer/component decisions below: the main app now uses Kit 0.6.6 / GPUI pre 0.3.6 on Metal, with macOS 15 as the package minimum. The following completion/signing notes describe the pre-Kit checkpoint; current input, hardware and release validation is recorded in the [migration checkpoint](../summary/2026-09-21-kit-app-migration.md).
+
 The native roadmap takes priority over controller development. Existing controller input is preserved and routed to the active pane; new controller features remain in the [controller roadmap](ps2-terminal-roadmap.md).
 
 The original phase-by-phase plan and historical verification notes are preserved in [the July plan](old-maps/gpui-rebuild-plan-2026-07.md). This document describes the current implementation rather than the superseded Metal/git-dependency experiments.

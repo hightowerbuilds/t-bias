@@ -1,22 +1,31 @@
-use crate::{prompts::Library, text_field::TextField};
+use crate::{prompts::Library, ui::button};
 use gpui::{div, prelude::*, px, rgb, Context, Entity, EventEmitter, Subscription, Window};
+use gpui_kit::component::{
+    input::{Input, InputState, Textarea, TextareaState},
+    ActiveTheme,
+};
 pub enum PromptEvent {
     Send(String),
     Close,
 }
 pub struct PromptPanel {
+    focus_requested: bool,
     library: Library,
     conn: Option<rusqlite::Connection>,
-    search: Entity<TextField>,
-    editor: Entity<TextField>,
-    tags: Entity<TextField>,
+    search: Entity<InputState>,
+    editor: Entity<TextareaState>,
+    tags: Entity<InputState>,
     editing: Option<String>,
     error: Option<String>,
     _search: Subscription,
 }
 impl EventEmitter<PromptEvent> for PromptPanel {}
 impl PromptPanel {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn focus(&mut self, cx: &mut Context<Self>) {
+        self.focus_requested = true;
+        cx.notify();
+    }
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut error = None;
         let conn = crate::db::default_db_path()
             .and_then(|p| crate::db::open(&p))
@@ -30,11 +39,13 @@ impl PromptPanel {
                     .ok()
             })
             .unwrap_or_default();
-        let search = cx.new(|cx| TextField::new("Search prompts or tags", false, cx));
-        let editor = cx.new(|cx| TextField::new("Write a prompt…", true, cx));
-        let tags = cx.new(|cx| TextField::new("Tags, separated by commas", false, cx));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search prompts or tags"));
+        let editor = cx.new(|cx| TextareaState::new(window, cx).placeholder("Write a prompt…"));
+        let tags =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Tags, separated by commas"));
         let observer = cx.observe(&search, |_, _, cx| cx.notify());
         Self {
+            focus_requested: false,
             library,
             conn,
             search,
@@ -64,12 +75,12 @@ impl PromptPanel {
             }
         }
     }
-    fn save_editor(&mut self, cx: &mut Context<Self>) {
-        let text = self.editor.read(cx).text.clone();
+    fn save_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.editor.read(cx).value().to_string();
         let tags: Vec<_> = self
             .tags
             .read(cx)
-            .text
+            .value()
             .split(',')
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty())
@@ -88,9 +99,8 @@ impl PromptPanel {
             self.error = Some(e.to_string());
             return;
         }
-        self.editor
-            .update(cx, |f, cx| f.set_text(String::new(), cx));
-        self.tags.update(cx, |f, cx| f.set_text(String::new(), cx));
+        self.editor.update(cx, |f, cx| f.set_value("", window, cx));
+        self.tags.update(cx, |f, cx| f.set_value("", window, cx));
         self.error = None;
         self.save(cx);
     }
@@ -142,22 +152,13 @@ impl PromptPanel {
         .detach();
     }
 }
-fn button(
-    id: impl Into<gpui::ElementId>,
-    label: impl Into<gpui::SharedString>,
-) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .bg(rgb(0x21262d))
-        .hover(|d| d.bg(rgb(0x30363d)))
-        .child(label.into())
-}
 impl Render for PromptPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let query = self.search.read(cx).text.to_lowercase();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.focus_requested {
+            self.focus_requested = false;
+            self.search.update(cx, |s, cx| s.focus(window, cx));
+        }
+        let query = self.search.read(cx).value().to_lowercase();
         let mut queue = div().flex().flex_col().gap_1();
         for (i, id) in self.library.queue.iter().enumerate() {
             if let Some(p) = self.library.prompts.iter().find(|p| &p.id == id) {
@@ -226,18 +227,19 @@ impl Render for PromptPanel {
             list = list.child(
                 div()
                     .border_1()
-                    .border_color(rgb(0x30363d))
+                    .border_color(cx.theme().border)
                     .rounded_md()
                     .p_2()
                     .flex()
                     .flex_col()
                     .gap_1()
                     .child(p.text.chars().take(400).collect::<String>())
-                    .child(div().text_color(rgb(0x58a6ff)).child(tags))
+                    .child(div().text_color(cx.theme().primary).child(tags))
                     .child(
                         div()
                             .flex()
                             .gap_1()
+                            .flex_wrap()
                             .child(button(("enqueue", i), "Queue").on_click(cx.listener(
                                 move |this, _, _, cx| {
                                     this.library.enqueue(&id);
@@ -248,14 +250,16 @@ impl Render for PromptPanel {
                                 move |_, _, _, cx| cx.emit(PromptEvent::Send(send.clone())),
                             )))
                             .child(button(("edit", i), "Edit").on_click(cx.listener(
-                                move |this, _, _, cx| {
+                                move |this, _, window, cx| {
                                     if let Some(p) =
                                         this.library.prompts.iter().find(|p| p.id == edit).cloned()
                                     {
                                         this.editing = Some(edit.clone());
-                                        this.editor.update(cx, |f, cx| f.set_text(p.text, cx));
-                                        this.tags
-                                            .update(cx, |f, cx| f.set_text(p.tags.join(", "), cx));
+                                        this.editor
+                                            .update(cx, |f, cx| f.set_value(p.text, window, cx));
+                                        this.tags.update(cx, |f, cx| {
+                                            f.set_value(p.tags.join(", "), window, cx)
+                                        });
                                         cx.notify();
                                     }
                                 },
@@ -291,8 +295,8 @@ impl Render for PromptPanel {
             .flex_col()
             .gap_2()
             .p_3()
-            .bg(rgb(0x161b22))
-            .text_color(rgb(0xe6edf3))
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .text_size(px(13.))
             .child(
                 div()
@@ -316,9 +320,13 @@ impl Render for PromptPanel {
             .when_some(self.error.clone(), |d, e| {
                 d.child(div().text_color(rgb(0xff7b72)).child(e))
             })
-            .child(self.search.clone())
-            .child(self.editor.clone())
-            .child(self.tags.clone())
+            .child(Input::new(&self.search).aria_label("Search prompts"))
+            .child(
+                Textarea::new(&self.editor)
+                    .h(px(150.))
+                    .aria_label("Prompt text"),
+            )
+            .child(Input::new(&self.tags).aria_label("Prompt tags"))
             .child(
                 button(
                     "save",
@@ -328,7 +336,7 @@ impl Render for PromptPanel {
                         "Save prompt"
                     },
                 )
-                .on_click(cx.listener(|this, _, _, cx| this.save_editor(cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.save_editor(window, cx))),
             )
             .child(
                 div()
@@ -345,7 +353,90 @@ impl Render for PromptPanel {
                         },
                     ))),
             )
-            .child(queue)
+            .child(
+                div()
+                    .id("prompt-queue")
+                    .max_h(px(100.))
+                    .overflow_y_scroll()
+                    .child(queue),
+            )
             .child(list)
+    }
+}
+
+impl PromptPanel {
+    pub fn kit_smoke(&mut self, phase: usize, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui::Focusable;
+        match phase {
+            0 => {
+                self.editor.update(cx, |s, cx| {
+                    s.set_value("A draft 中文 🦀\nsecond line", window, cx);
+                    s.focus(window, cx);
+                });
+                self.tags
+                    .update(cx, |s, cx| s.set_value("Test, Unicode", window, cx));
+            }
+            1 => {
+                assert!(self.editor.focus_handle(cx).is_focused(window));
+                window.defer(cx, |window, cx| {
+                    window.dispatch_keystroke(gpui::Keystroke::parse("cmd-down").unwrap(), cx);
+                    window.dispatch_keystroke(gpui::Keystroke::parse("x").unwrap(), cx);
+                });
+            }
+            2 => {
+                assert!(
+                    self.editor.read(cx).value().ends_with('x'),
+                    "Kit field did not receive typing"
+                );
+                self.save_editor(window, cx);
+                assert_eq!(self.library.prompts.len(), 1);
+                assert_eq!(self.library.prompts[0].tags, vec!["test", "unicode"]);
+                assert_eq!(
+                    Library::load(self.conn.as_ref().unwrap()).unwrap(),
+                    self.library
+                );
+            }
+            3 => {
+                self.editor.update(cx, |s, cx| {
+                    s.set_value("Unsaved draft survives navigation", window, cx)
+                });
+            }
+            4 => {
+                assert_eq!(
+                    self.editor.read(cx).value(),
+                    "Unsaved draft survives navigation"
+                );
+                let path = crate::config::data_dir().unwrap().join("must-not-exist");
+                let text = format!("touch '{}' # KIT_SEND_", path.display());
+                self.editor
+                    .update(cx, |s, cx| s.set_value(text, window, cx));
+                self.save_editor(window, cx);
+                let id = self.library.prompts.first().unwrap().id.clone();
+                self.library.enqueue(&id);
+                self.save(cx);
+            }
+            5 => {
+                self.send_next(cx);
+                assert!(self.library.queue.is_empty());
+            }
+            6 => {
+                let text: String = (0..300).map(|i| format!("Line {i}: 中文 🦀\n")).collect();
+                self.editor.update(cx, |s, cx| {
+                    s.set_value(text, window, cx);
+                    s.focus(window, cx);
+                });
+                window.defer(cx, |window, cx| {
+                    window.dispatch_keystroke(gpui::Keystroke::parse("cmd-down").unwrap(), cx);
+                });
+            }
+            7 => {
+                assert!(
+                    self.editor.read(cx).scroll_offset().y < px(-100.),
+                    "long prompt did not scroll"
+                );
+                assert!(self.editor.read(cx).visible_row_range().unwrap().end >= 300);
+            }
+            _ => {}
+        }
     }
 }

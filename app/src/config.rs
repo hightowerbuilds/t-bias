@@ -6,6 +6,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    pub controller: crate::controller::profile::Profile,
+    pub activity_monitor: ActivityMonitorConfig,
     pub theme: String,
     pub font_family: String,
     pub font_size: f32,
@@ -16,9 +18,21 @@ pub struct Config {
     pub option_as_meta: bool,
     pub keybindings: BTreeMap<String, String>,
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ActivityMonitorConfig {
+    pub refresh_seconds: u64,
+}
+impl Default for ActivityMonitorConfig {
+    fn default() -> Self {
+        Self { refresh_seconds: 2 }
+    }
+}
 impl Default for Config {
     fn default() -> Self {
         Self {
+            controller: Default::default(),
+            activity_monitor: ActivityMonitorConfig::default(),
             theme: "dark".into(),
             font_family: "Menlo".into(),
             font_size: 14.,
@@ -48,6 +62,7 @@ impl Default for Config {
                 ("prompts", "cmd-shift-p"),
                 ("send_next_prompt", "cmd-shift-q"),
                 ("settings", "cmd-,"),
+                ("activity_monitor", "cmd-shift-a"),
             ]
             .into_iter()
             .map(|(a, b)| (a.into(), b.into()))
@@ -83,6 +98,10 @@ impl Config {
     }
     pub fn parse(text: &str) -> Result<Self> {
         let mut config: Self = toml::from_str(text)?;
+        config.controller.validate()?;
+        if ![1, 2, 5].contains(&config.activity_monitor.refresh_seconds) {
+            bail!("activity_monitor.refresh_seconds must be 1, 2, or 5");
+        }
         if !["dark", "light", "dracula"].contains(&config.theme.as_str()) {
             bail!("theme must be dark, light, or dracula");
         }
@@ -167,6 +186,8 @@ mod tests {
         let c = Config::parse("theme = 'light'\n[keybindings]\nnew_tab = 'cmd-n'").unwrap();
         assert_eq!(c.keybindings["new_tab"], "cmd-n");
         assert_eq!(c.keybindings["copy"], "cmd-c");
+        assert_eq!(c.keybindings["activity_monitor"], "cmd-shift-a");
+        assert_eq!(c.activity_monitor.refresh_seconds, 2);
     }
     #[test]
     fn rejects_invalid_values() {
@@ -175,8 +196,130 @@ mod tests {
             "opacity = 0.0",
             "theme = 'missing'",
             "line_height = -1.0",
+            "[activity_monitor]\nrefresh_seconds = 0",
+            "[activity_monitor]\nrefresh_seconds = 3",
         ] {
             assert!(Config::parse(text).is_err());
         }
+    }
+}
+
+/// Save only settings owned by the settings view, preserving controller profiles
+/// and untouched values/comments. Optimistic conflict detection precedes atomic
+/// replacement; runtime settings are intentionally not modified here.
+pub fn save_settings(path: &std::path::Path, baseline: &str, draft: &Config) -> Result<String> {
+    use std::io::Write;
+    let current = std::fs::read_to_string(path)?;
+    if current != baseline {
+        bail!("Configuration changed outside this editor. Reload saved before applying.");
+    }
+    let before =
+        Config::parse(&current).context("Existing configuration is invalid; original preserved")?;
+    let serialized = toml::to_string(draft)?;
+    Config::parse(&serialized)?;
+    let mut doc = current.parse::<toml_edit::DocumentMut>()?;
+    let proposed = serialized.parse::<toml_edit::DocumentMut>()?;
+    let old = toml::to_string(&before)?.parse::<toml_edit::DocumentMut>()?;
+    fn update(target: &mut toml_edit::Item, value: &toml_edit::Item) {
+        let decor = target.as_value().map(|v| v.decor().clone());
+        *target = value.clone();
+        if let (Some(decor), Some(value)) = (decor, target.as_value_mut()) {
+            *value.decor_mut() = decor;
+        }
+    }
+    for key in [
+        "theme",
+        "font_family",
+        "font_size",
+        "line_height",
+        "padding",
+        "opacity",
+        "cursor_blink",
+        "option_as_meta",
+    ] {
+        if old[key].to_string() != proposed[key].to_string() {
+            update(&mut doc[key], &proposed[key]);
+        }
+    }
+    if before.activity_monitor.refresh_seconds != draft.activity_monitor.refresh_seconds {
+        update(
+            &mut doc["activity_monitor"]["refresh_seconds"],
+            &proposed["activity_monitor"]["refresh_seconds"],
+        );
+    }
+    for (key, value) in &draft.keybindings {
+        if before.keybindings.get(key) != Some(value) {
+            update(&mut doc["keybindings"][key], &proposed["keybindings"][key]);
+        }
+    }
+    let text = doc.to_string();
+    Config::parse(&text)?;
+    let temp = path.with_extension(format!(
+        "settings-{}-{}.tmp",
+        std::process::id(),
+        crate::workspace_view::now()
+    ));
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)?;
+        file.set_permissions(std::fs::metadata(path)?.permissions())?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        if std::fs::read_to_string(path)? != baseline {
+            bail!("Configuration changed during save. Reload saved before applying.");
+        }
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result?;
+    Ok(text)
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    #[test]
+    fn settings_save_preserves_profiles_and_comments_and_rejects_conflicts() {
+        let path = std::env::temp_dir().join(format!("tbias-settings-{}.toml", std::process::id()));
+        let mut profile = crate::controller::profile::Profile::default();
+        profile.set(
+            crate::controller::profile::Surface::Terminal,
+            crate::gamepad::PsButton::Circle,
+            crate::controller::profile::Action::Enter,
+        );
+        let baseline = format!(
+            "# personal settings\ntheme = 'dark' # appearance\n\n[controller]\n{}",
+            toml::to_string(&profile)
+                .unwrap()
+                .replace("version = 1", "version = 1 # keep")
+                .replace("[bindings", "[controller.bindings")
+        );
+        let baseline = baseline.as_str();
+        std::fs::write(&path, baseline).unwrap();
+        let mut draft = Config::parse(baseline).unwrap();
+        draft.theme = "dracula".into();
+        draft.activity_monitor.refresh_seconds = 5;
+        draft.keybindings.insert("new_tab".into(), "cmd-n".into());
+        let saved = save_settings(&path, baseline, &draft).unwrap();
+        assert!(saved.contains("# appearance"));
+        assert!(saved.contains("version = 1 # keep"));
+        let parsed = Config::parse(&saved).unwrap();
+        assert_eq!(parsed.theme, "dracula");
+        assert_eq!(parsed.activity_monitor.refresh_seconds, 5);
+        assert_eq!(parsed.keybindings["new_tab"], "cmd-n");
+        assert_eq!(parsed.controller, draft.controller);
+        assert!(save_settings(&path, baseline, &draft).is_err());
+        draft.opacity = f32::NAN;
+        assert!(save_settings(&path, &saved, &draft).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        std::fs::write(&path, "invalid = [").unwrap();
+        assert!(save_settings(&path, "invalid = [", &Config::default()).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "invalid = [");
+        std::fs::remove_file(path).unwrap();
     }
 }

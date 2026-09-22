@@ -17,19 +17,14 @@
 // phases; the Phase 0 wiring only needs buttons. Allow dead code until then,
 // matching the convention in `pane_tree.rs` / `workspace.rs` / `db.rs`.
 #![allow(dead_code)]
+mod hub;
+pub use hub::{stick_events, Device, Hub, Update};
 
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, TAU};
-use std::thread;
-use std::time::Duration;
 
-use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use gilrs::{Axis, Button, EventType, Gilrs};
+use gilrs::Button;
 
 use crate::input::KeyMods;
-
-/// Poll interval. 125 Hz keeps button latency under 8 ms (a gamepad user feels
-/// anything past ~16 ms) and gives analog scrolling a smooth repeat rate.
-const TICK: Duration = Duration::from_millis(8);
 
 /// Stick deflection needed to *enter* a sector, and the lower value it must fall
 /// back below to *leave* one. The gap is deliberate hysteresis — a thumb resting
@@ -44,7 +39,11 @@ const SECTOR_MARGIN: f32 = 0.3;
 /// The abstract PlayStation button layout. Deliberately *not* gilrs's naming:
 /// a DualShock 2 behind a USB adapter and a DualShock 4 over Bluetooth differ
 /// only in how they map onto this enum.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum PsButton {
     Triangle,
     Circle,
@@ -62,6 +61,46 @@ pub enum PsButton {
     R3,
     Start,
     Select,
+}
+impl PsButton {
+    pub const ALL: [Self; 16] = [
+        Self::Triangle,
+        Self::Circle,
+        Self::Cross,
+        Self::Square,
+        Self::Up,
+        Self::Down,
+        Self::Left,
+        Self::Right,
+        Self::L1,
+        Self::R1,
+        Self::L2,
+        Self::R2,
+        Self::L3,
+        Self::R3,
+        Self::Start,
+        Self::Select,
+    ];
+    pub fn label(self) -> &'static str {
+        [
+            "Triangle",
+            "Circle",
+            "Cross",
+            "Square",
+            "D-pad up",
+            "D-pad down",
+            "D-pad left",
+            "D-pad right",
+            "L1",
+            "R1",
+            "L2",
+            "R2",
+            "L3",
+            "R3",
+            "Start",
+            "Select",
+        ][self as usize]
+    }
 }
 
 /// Which analog stick a reading came from.
@@ -144,103 +183,6 @@ pub fn binding(button: PsButton) -> Option<PadAction> {
     }
 }
 
-/// Start the controller thread. Returns the receiver to drain on the UI side;
-/// `None` if no gamepad subsystem could be opened at all (the app stays fully
-/// usable by keyboard — the pad is always an *additional* input source).
-pub fn spawn() -> Option<UnboundedReceiver<PadEvent>> {
-    let (tx, rx) = unbounded::<PadEvent>();
-    match thread::Builder::new()
-        .name("tbias-gamepad".into())
-        .spawn(move || poll_loop(tx))
-    {
-        Ok(_) => Some(rx),
-        Err(err) => {
-            log::error!("failed to spawn gamepad thread: {err}");
-            None
-        }
-    }
-}
-
-/// Owns `Gilrs` for the life of the thread, translating its events into
-/// `PadEvent`s. Exits (silently, leaving the keyboard working) if the gamepad
-/// subsystem is unavailable.
-fn poll_loop(tx: UnboundedSender<PadEvent>) {
-    let mut gilrs = match Gilrs::new() {
-        Ok(g) => g,
-        Err(err) => {
-            log::error!("gamepad subsystem unavailable: {err}");
-            return;
-        }
-    };
-
-    // Announce controllers already paired and awake at startup — gilrs only
-    // emits `Connected` for devices that arrive *after* initialization.
-    for (_id, gamepad) in gilrs.gamepads() {
-        if tx
-            .unbounded_send(PadEvent::Connected(gamepad.name().to_string()))
-            .is_err()
-        {
-            return;
-        }
-    }
-
-    let mut left = StickState::default();
-    let mut right = StickState::default();
-
-    loop {
-        while let Some(event) = gilrs.next_event() {
-            let send = match event.event {
-                EventType::ButtonPressed(button, _) => map_button(button).map(PadEvent::Pressed),
-                EventType::ButtonReleased(button, _) => map_button(button).map(PadEvent::Released),
-                EventType::AxisChanged(axis, value, _) => {
-                    match axis {
-                        Axis::LeftStickX => left.x = value,
-                        Axis::LeftStickY => left.y = value,
-                        Axis::RightStickX => right.x = value,
-                        Axis::RightStickY => right.y = value,
-                        _ => {}
-                    }
-                    None // the per-tick emit below covers sticks
-                }
-                EventType::Connected => Some(PadEvent::Connected(
-                    gilrs.gamepad(event.id).name().to_string(),
-                )),
-                EventType::Disconnected => {
-                    // A DualShock 4 sleeps aggressively; recover the neutral
-                    // position so a stale deflection can't scroll forever.
-                    left = StickState::default();
-                    right = StickState::default();
-                    Some(PadEvent::Disconnected(
-                        gilrs.gamepad(event.id).name().to_string(),
-                    ))
-                }
-                _ => None,
-            };
-            if let Some(event) = send {
-                if tx.unbounded_send(event).is_err() {
-                    return; // UI is gone
-                }
-            }
-        }
-
-        // Repeat deflected sticks every tick so held-stick scrolling continues.
-        for (stick, state) in [(Stick::Left, left), (Stick::Right, right)] {
-            if state.magnitude() >= DEAD_ZONE_EXIT {
-                let event = PadEvent::Stick {
-                    stick,
-                    x: state.x,
-                    y: state.y,
-                };
-                if tx.unbounded_send(event).is_err() {
-                    return;
-                }
-            }
-        }
-
-        thread::sleep(TICK);
-    }
-}
-
 #[derive(Clone, Copy, Default)]
 struct StickState {
     x: f32,
@@ -251,6 +193,18 @@ impl StickState {
     fn magnitude(&self) -> f32 {
         (self.x * self.x + self.y * self.y).sqrt()
     }
+}
+
+/// Repeat held deflections and emit exactly one neutral event on release.
+fn stick_event(stick: Stick, state: StickState, was_deflected: &mut bool) -> Option<PadEvent> {
+    let deflected = state.magnitude() >= DEAD_ZONE_EXIT;
+    let emit = deflected || *was_deflected;
+    *was_deflected = deflected;
+    emit.then_some(PadEvent::Stick {
+        stick,
+        x: if deflected { state.x } else { 0. },
+        y: if deflected { state.y } else { 0. },
+    })
 }
 
 /// gilrs's abstract button names onto the PlayStation layout. gilrs calls the
@@ -382,6 +336,23 @@ mod tests {
         assert_eq!(map_button(Button::North), Some(PsButton::Triangle));
         assert_eq!(map_button(Button::South), Some(PsButton::Cross));
         assert_eq!(map_button(Button::Unknown), None);
+    }
+
+    #[test]
+    fn stick_release_emits_one_neutral_without_idle_flooding() {
+        let mut held = false;
+        assert!(stick_event(Stick::Left, StickState::default(), &mut held).is_none());
+        assert!(stick_event(Stick::Left, StickState { x: 0.8, y: 0. }, &mut held).is_some());
+        assert!(stick_event(Stick::Left, StickState { x: 0.8, y: 0. }, &mut held).is_some());
+        assert_eq!(
+            stick_event(Stick::Left, StickState::default(), &mut held),
+            Some(PadEvent::Stick {
+                stick: Stick::Left,
+                x: 0.,
+                y: 0.
+            })
+        );
+        assert!(stick_event(Stick::Left, StickState::default(), &mut held).is_none());
     }
 
     #[test]

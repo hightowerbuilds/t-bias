@@ -1,5 +1,7 @@
 # t-bias — PS2 Controller Terminal Roadmap
 
+**2026-09-21 update:** the [Controller surface roadmap](controller-surface-roadmap.md) now has a working wgpu diagram and button editor, opened from the persistent footer. It includes per-device state, capture/test preview, and saved per-surface assignments. Current routing lives in `WorkspaceView`, config logging is initialized, and stick releases emit neutral transitions. Hardware status and older implementation references below are historical checkpoints, not a current device-support certification. Axis calibration, adapter/transport testing, text entry, and haptics remain later work.
+
 **Goal:** The first terminal emulator designed to be *driven by a PlayStation controller*.
 Not a gamepad bolted onto a keyboard app — a terminal whose interaction model assumes two
 thumbs, twelve buttons, and two analog sticks, and which is genuinely pleasant to use that way.

@@ -1,0 +1,18 @@
+[package]
+name = "tbias-gpui-kit-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Separate dependency graph: never link the app's GPUI 0.2.2 into this process.
+[workspace]
+
+[dependencies]
+gpui-kit = "=0.6.6"
+alacritty_terminal = "=0.26.0"
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+debug = 0

@@ -16,7 +16,8 @@ actions!(
         Paste,
         Flip,
         Prompts,
-        SendNextPrompt
+        SendNextPrompt,
+        ActivityMonitor
     ]
 );
 pub fn install(cx: &mut App) {
@@ -24,6 +25,7 @@ pub fn install(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.set_menus(vec![
         Menu {
+            disabled: false,
             name: "t-bias".into(),
             items: vec![
                 MenuItem::action("About t-bias", About),
@@ -34,6 +36,7 @@ pub fn install(cx: &mut App) {
             ],
         },
         Menu {
+            disabled: false,
             name: "File".into(),
             items: vec![
                 MenuItem::action("New Tab", NewTab),
@@ -41,6 +44,7 @@ pub fn install(cx: &mut App) {
             ],
         },
         Menu {
+            disabled: false,
             name: "Edit".into(),
             items: vec![
                 MenuItem::action("Copy", Copy),
@@ -48,6 +52,7 @@ pub fn install(cx: &mut App) {
             ],
         },
         Menu {
+            disabled: false,
             name: "View".into(),
             items: vec![
                 MenuItem::action("Split Side by Side", SplitHorizontal),
@@ -58,6 +63,7 @@ pub fn install(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action("Files / Terminal", Flip),
                 MenuItem::action("Prompt Library", Prompts),
+                MenuItem::action("Activity Monitor", ActivityMonitor),
                 MenuItem::action("Send Next Prompt", SendNextPrompt),
             ],
         },

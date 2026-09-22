@@ -10,6 +10,7 @@ use gpui::{
     ClipboardItem, EntityInputHandler, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Point, UTF16Selection,
 };
+use gpui_kit::component::Disableable;
 use std::time::Duration;
 use std::{cell::Cell, ops::Range, rc::Rc};
 
@@ -184,9 +185,17 @@ impl TerminalPane {
                 cx.notify();
             }
             PadEvent::Pressed(button) => {
-                // The explorer face is browsed with the mouse for now; pad
-                // navigation of the listing lands with the modal system.
+                // The profile resolver translates file actions to these controls.
                 if self.face != Face::Terminal {
+                    let key = match button {
+                        gamepad::PsButton::Up => "up",
+                        gamepad::PsButton::Down => "down",
+                        gamepad::PsButton::Cross => "enter",
+                        gamepad::PsButton::Square => "backspace",
+                        gamepad::PsButton::Circle => "escape",
+                        _ => return,
+                    };
+                    self.explorer_key(key, cx);
                     return;
                 }
                 let Some(action) = gamepad::binding(button) else {
@@ -380,19 +389,9 @@ impl TerminalPane {
             return self.render_preview(preview, cx);
         }
         let at_root = self.explorer.at_root();
-        let up = div()
-            .id("explorer-up")
-            .px_2()
-            .rounded_md()
-            .text_color(if at_root {
-                rgb(0x484f58)
-            } else {
-                rgb(0x58a6ff)
-            })
-            .when(!at_root, |el| {
-                el.hover(|s| s.bg(Theme::from_config(&self.config).raised()))
-            })
-            .child("..")
+        let up = crate::ui::button("explorer-up", "↑")
+            .tooltip("Parent directory")
+            .disabled(at_root)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.explorer.up();
                 cx.notify();
@@ -471,16 +470,7 @@ impl TerminalPane {
 
     /// Build the markdown preview face (toolbar + rendered document).
     fn render_preview(&self, preview: &Preview, cx: &mut Context<Self>) -> AnyElement {
-        let button = |id: &'static str, label: &'static str| {
-            div()
-                .id(id)
-                .px_2()
-                .rounded_md()
-                .bg(Theme::from_config(&self.config).raised())
-                .text_color(Theme::from_config(&self.config).fg)
-                .hover(|s| s.bg(rgb(0x30363d)))
-                .child(label)
-        };
+        let button = crate::ui::button;
 
         let toolbar = div()
             .flex()
@@ -556,7 +546,7 @@ impl Render for TerminalPane {
         // Grab keyboard focus on first paint so typing works immediately.
         if self.focus_requested {
             self.focus_requested = false;
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
         let focused = self.focus.is_focused(window);
         let flipping = self.flip.is_some();
@@ -620,16 +610,8 @@ impl Render for TerminalPane {
             )
             .child(div().flex_1())
             .child(
-                div()
-                    .id("flip-btn")
-                    .px_2()
-                    .rounded_md()
-                    .bg(Theme::from_config(&self.config).raised())
-                    .text_color(Theme::from_config(&self.config).fg)
-                    .font_family(self.config.font_family.clone())
-                    .text_size(px(12.))
-                    .hover(|s| s.bg(rgb(0x30363d)))
-                    .child(flip_label)
+                crate::ui::button("flip-btn", flip_label)
+                    .tooltip("Files / Terminal · ⌘E")
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_flip(cx))),
             );
 
@@ -755,6 +737,13 @@ impl TerminalPane {
         self.flip = None;
         cx.notify();
     }
+    pub fn show_explorer(&mut self, cx: &mut Context<Self>) {
+        if self.face != Face::Explorer {
+            self.restore_explorer();
+        }
+        self.flip = None;
+        cx.notify();
+    }
     pub fn paste(&mut self, text: &str, cx: &mut Context<Self>) {
         if let Some(term) = &self.terminal {
             let h = term.handle();
@@ -850,7 +839,7 @@ impl TerminalPane {
         }
     }
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.mouse_last = None;
         self.mouse_button = Some(event.button);
         let Some((col, row, side)) = self.cell_at(event.position) else {
@@ -1061,6 +1050,7 @@ impl TerminalPane {
             &KeyDownEvent {
                 keystroke,
                 is_held: false,
+                prefer_character_input: false,
             },
             cx,
         );
